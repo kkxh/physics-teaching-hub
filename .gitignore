@@ -1,0 +1,52 @@
+# ============================================================
+# 物理教学中枢 — 默认拒绝清单
+# 这里列出的内容永不进入公开仓库。
+# 新增规则时请同步更新 scripts/privacy_scan.sh 与 docs/PRIVACY.md。
+# ============================================================
+
+# 数据库与运行产物
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+
+# 生成物与中间产物
+outputs/
+output/
+tmp/
+demo/
+build/
+dist/
+
+# 使用者自备数据（目录结构说明由 data/README.md 承担）
+data/*
+!data/README.md
+
+# 本地私有配置与私有词表
+config.local.toml
+config.toml
+.privacy-terms.local
+.env
+.env.*
+
+# 教学文档与试卷（确实需要留档时，人工审阅后 git add -f）
+*.docx
+*.doc
+*.pptx
+*.ppt
+*.xlsx
+*.xls
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# 编辑器与系统文件
+.DS_Store
+.idea/
+.vscode/

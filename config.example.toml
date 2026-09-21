@@ -1,0 +1,29 @@
+# 物理教学中枢 — 示例配置
+#
+# 用法：复制为 config.toml 后按自己的情况修改。
+# config.toml 已在 .gitignore 中，不会进入 Git。
+#
+# 设计原则：引擎不绑定学段、学科、班级与路径；这些都属于使用者本地配置。
+
+[project]
+name = "物理教学中枢"
+
+# 学段：high_school（高中） | middle_school（初中）
+# Phase 1 起，学段会决定阶段定义与文案取自哪一套 profile。
+stage = "high_school"
+subject = "physics"
+timezone = "Asia/Shanghai"
+
+[paths]
+# 数据库与输出目录都在使用者的本地环境里，不入 Git。
+database = "data/physics_teaching.db"
+output_dir = "outputs"
+
+[classes]
+# 班级由使用者自行填写；下面的班名是虚构示例。
+names = ["高一(A)班", "高一(B)班"]
+
+[schedule]
+# 课表起点与周次安排，Phase 1 接入。
+starts_on = "2026-09-01"
+weekdays = [1, 2, 3, 4, 5]
