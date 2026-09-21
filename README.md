@@ -28,7 +28,7 @@
 ## 快速开始
 
 ```bash
-git clone <仓库地址>
+git clone https://github.com/kkxh/physics-teaching-hub.git
 cd physics-teaching-hub
 
 python3 -m unittest discover -s tests -t .   # 跑测试
