@@ -19,7 +19,7 @@ timezone = "Asia/Shanghai"
 
 [paths]
 # 数据库与输出目录都在使用者的本地环境里，不入 Git。
-# 相对路径以「本配置文件所在目录」为基准解析（P1.2 接入；在此之前仍相对工作目录）。
+# 相对路径以「本配置文件所在目录」为基准解析，与当前工作目录无关；~ 会展开为家目录。
 database = "data/physics_teaching.db"
 output_dir = "outputs"
 
@@ -34,7 +34,7 @@ ends_on = "2027-01-22"
 names = ["高一(A)班", "高一(B)班"]
 
 [schedule]
-# 课表起点；省略时取 semester.starts_on。教学周从这一周开始计（P1.2 接入）。
+# 课表起点；省略时取 semester.starts_on。这一周所在的周一算第 1 教学周（一周从周一开始）。
 starts_on = "2026-09-01"
 
 # 上课日：1=周一 … 7=周日；缺省为周一至周五。

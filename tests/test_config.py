@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import sys
+import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
@@ -35,6 +38,16 @@ EXPECTED_ENV_NAMES = {
 }
 
 
+@contextlib.contextmanager
+def chdir(path: Path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
 def minimal_raw(**sections: Any) -> dict[str, Any]:
     """最小可用配置：只给猜不出来的必填项——学期起止。"""
     raw: dict[str, Any] = {"semester": dict(SEMESTER)}
@@ -52,7 +65,7 @@ def section_body(text: str, section: str) -> str:
 
 class ExampleConfigTests(unittest.TestCase):
     def test_example_config_parses_with_expected_values(self):
-        config = config_loader.load_config(config_loader.EXAMPLE_CONFIG_PATH, env={})
+        config = config_loader.load_config(ROOT / config_loader.EXAMPLE_CONFIG_PATH, env={})
 
         self.assertEqual(config.project.name, "物理教学中枢")
         self.assertEqual(config.project.stage, "high_school")
@@ -65,6 +78,9 @@ class ExampleConfigTests(unittest.TestCase):
         self.assertEqual(config.schedule.starts_on, config.semester.starts_on)
         self.assertEqual(config.schedule.weekdays, (1, 2, 3, 4, 5))
         self.assertTrue(config.schedule.periods)
+        self.assertEqual(config.base_dir, ROOT)
+        self.assertEqual(config.paths.database, ROOT / "data" / "physics_teaching.db")
+        self.assertEqual(config.paths.output_dir, ROOT / "outputs")
 
     def test_example_config_covers_every_documented_field(self):
         text = config_loader.EXAMPLE_CONFIG_PATH.read_text(encoding="utf-8")
@@ -175,6 +191,14 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(config.semester.starts_on, date(2026, 8, 24))
         self.assertEqual(config.schedule.starts_on, date(2026, 9, 1))
 
+    def test_schedule_start_after_semester_end_is_rejected(self):
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            config_loader.parse_config(minimal_raw(schedule={"starts_on": "2027-02-01"}))
+
+        message = str(ctx.exception)
+        self.assertIn("schedule.starts_on", message)
+        self.assertIn("semester.ends_on", message)
+
     def test_weekday_out_of_range_is_rejected(self):
         with self.assertRaises(config_loader.ConfigError) as ctx:
             config_loader.parse_config(minimal_raw(schedule={"weekdays": [1, 8]}))
@@ -232,23 +256,26 @@ class EnvOverrideTests(unittest.TestCase):
             self.assertIn(name, readme, msg=f"README 没有写环境变量 {name}")
 
     def test_whitelisted_env_vars_override_file_values(self):
-        config = config_loader.parse_config(
-            minimal_raw(
-                project={"stage": "high_school", "timezone": "Asia/Shanghai"},
-                paths={"database": "data/a.db", "output_dir": "outputs"},
-            ),
-            env={
-                "PHYSICS_TEACHING_STAGE": "middle_school",
-                "PHYSICS_TEACHING_TIMEZONE": "America/New_York",
-                "PHYSICS_TEACHING_DATABASE": "data/b.db",
-                "PHYSICS_TEACHING_OUTPUT_DIR": "reports",
-            },
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = config_loader.parse_config(
+                minimal_raw(
+                    project={"stage": "high_school", "timezone": "Asia/Shanghai"},
+                    paths={"database": "data/a.db", "output_dir": "outputs"},
+                ),
+                env={
+                    "PHYSICS_TEACHING_STAGE": "middle_school",
+                    "PHYSICS_TEACHING_TIMEZONE": "America/New_York",
+                    "PHYSICS_TEACHING_DATABASE": "data/b.db",
+                    "PHYSICS_TEACHING_OUTPUT_DIR": "reports",
+                },
+                base_dir=base,
+            )
 
-        self.assertEqual(config.project.stage, "middle_school")
-        self.assertEqual(config.project.timezone, "America/New_York")
-        self.assertEqual(config.paths.database, Path("data/b.db"))
-        self.assertEqual(config.paths.output_dir, Path("reports"))
+            self.assertEqual(config.project.stage, "middle_school")
+            self.assertEqual(config.project.timezone, "America/New_York")
+            self.assertEqual(config.paths.database, base / "data" / "b.db")
+            self.assertEqual(config.paths.output_dir, base / "reports")
 
     def test_env_vars_outside_the_whitelist_are_ignored(self):
         baseline = config_loader.parse_config(minimal_raw(project={"stage": "middle_school"}))
@@ -303,6 +330,111 @@ class EnvOverrideTests(unittest.TestCase):
             )
 
         self.assertIn("project.timezone", str(ctx.exception))
+
+
+class PathResolutionTests(unittest.TestCase):
+    def test_relative_paths_resolve_against_the_config_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conf_dir = Path(tmp) / "conf"
+            conf_dir.mkdir()
+            (conf_dir / "config.toml").write_text(
+                "\n".join(
+                    (
+                        "[semester]",
+                        'starts_on = "2026-09-01"',
+                        'ends_on = "2027-01-22"',
+                        "[paths]",
+                        'database = "data/x.db"',
+                        'output_dir = "out"',
+                    )
+                ),
+                encoding="utf-8",
+            )
+            elsewhere = Path(tmp) / "elsewhere"
+            elsewhere.mkdir()
+
+            with chdir(elsewhere):
+                config = config_loader.load_config(conf_dir / "config.toml", env={})
+
+            self.assertEqual(config.base_dir, conf_dir)
+            self.assertEqual(config.paths.database, conf_dir / "data" / "x.db")
+            self.assertEqual(config.paths.output_dir, conf_dir / "out")
+
+    def test_resolution_does_not_depend_on_the_working_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            conf = base / "config.toml"
+            conf.write_text(
+                "\n".join(
+                    (
+                        "[semester]",
+                        'starts_on = "2026-09-01"',
+                        'ends_on = "2027-01-22"',
+                        "[paths]",
+                        'database = "data/x.db"',
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with chdir(base):
+                first = config_loader.load_config(conf, env={})
+            with chdir(Path(tempfile.gettempdir())):
+                second = config_loader.load_config(conf, env={})
+
+            self.assertEqual(first, second)
+            self.assertEqual(first.paths.database, base / "data" / "x.db")
+
+    def test_absolute_paths_are_kept_as_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            absolute_db = base / "absolute" / "kept.db"
+
+            config = config_loader.parse_config(
+                minimal_raw(
+                    paths={"database": str(absolute_db), "output_dir": str(base / "out")}
+                ),
+                base_dir=base / "conf",
+            )
+
+            self.assertEqual(config.paths.database, absolute_db)
+            self.assertEqual(config.paths.output_dir, base / "out")
+
+    def test_tilde_is_expanded_to_the_home_directory(self):
+        config = config_loader.parse_config(
+            minimal_raw(paths={"database": "~/kept.db", "output_dir": "~/out"})
+        )
+
+        self.assertEqual(config.paths.database, Path.home() / "kept.db")
+        self.assertEqual(config.paths.output_dir, Path.home() / "out")
+
+    def test_parse_config_defaults_base_dir_to_the_current_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            with chdir(base):
+                config = config_loader.parse_config(minimal_raw())
+
+            self.assertEqual(config.base_dir, base)
+            self.assertEqual(config.paths.database, base / "data" / "physics_teaching.db")
+            self.assertEqual(config.paths.output_dir, base / "outputs")
+
+    def test_ensure_directories_creates_missing_parents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = config_loader.parse_config(
+                minimal_raw(paths={"database": "nested/db/x.db", "output_dir": "reports"}),
+                base_dir=base,
+            )
+            self.assertFalse((base / "nested").exists())
+
+            database_dir, output_dir = config_loader.ensure_directories(config)
+
+            self.assertEqual(database_dir, base / "nested" / "db")
+            self.assertEqual(output_dir, base / "reports")
+            self.assertTrue(database_dir.is_dir())
+            self.assertTrue(output_dir.is_dir())
+            # 幂等：再调一次也不报错
+            config_loader.ensure_directories(config)
 
 
 if __name__ == "__main__":

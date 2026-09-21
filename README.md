@@ -50,8 +50,8 @@ bash scripts/privacy_scan.sh                 # 隐私扫描
 | `project.stage` | 学段：`high_school`（高中） / `middle_school`（初中） | `PHYSICS_TEACHING_STAGE` |
 | `project.subject` | 学科标识，默认 `physics` | — |
 | `project.timezone` | IANA 时区，如 `Asia/Shanghai`；教学日与教学周按此时区计算 | `PHYSICS_TEACHING_TIMEZONE` |
-| `paths.database` | 数据库路径（相对路径以配置文件所在目录为基准，P1.2 接入） | `PHYSICS_TEACHING_DATABASE` |
-| `paths.output_dir` | 报告与导出目录 | `PHYSICS_TEACHING_OUTPUT_DIR` |
+| `paths.database` | 数据库路径 | `PHYSICS_TEACHING_DATABASE` |
+| `paths.output_dir` | 报告与导出目录（相对路径规则同左） | `PHYSICS_TEACHING_OUTPUT_DIR` |
 | `semester.name` | 学期名，进报告文案 | — |
 | `semester.starts_on` / `semester.ends_on` | 学期起止日期，必填 | — |
 | `classes.names` | 班级名列表 | — |
@@ -63,7 +63,15 @@ bash scripts/privacy_scan.sh                 # 隐私扫描
 
 - 环境变量只认上表列出的几个名字；白名单之外的 `PHYSICS_TEACHING_*` 一律忽略，避免配置来源不可追踪。
 - 换配置文件位置用 `PHYSICS_TEACHING_CONFIG=/path/to/config.toml`（Phase 1 后续命令会补 `--config` 参数）。
-- 配置不合法会直接报错并指出字段名：学段、时区、日期格式、学期起止先后、空班名、重复班名、上课日取值等都会被拦下。
+- 配置不合法会直接报错并指出字段名：学段、时区、日期格式、学期起止先后、课表起点晚于学期结束、空班名、重复班名、上课日取值等都会被拦下。
+
+### 路径与时间
+
+- 配置里的相对路径一律以「配置文件所在目录」为基准解析，跟你在哪个目录敲命令无关；`~` 展开为家目录，绝对路径原样使用。
+- 数据库目录与输出目录不存在时，首次运行会自动创建。使用者数据的存放约定见 [data/README.md](data/README.md)。
+- 一周从周一开始：`schedule.starts_on` 所在的那一周是第 1 教学周。学期范围之外的日期不算教学周；学期已开始但还没到课表起点时记为第 0 周（未开课）。
+- 上课日由 `schedule.weekdays` 决定（1=周一 … 7=周日）；「今天」按 `project.timezone` 计算，不依赖机器本地时区。
+- Phase 1 不处理节假日与调休。
 
 ## 长期路线
 

@@ -5,6 +5,7 @@ Phase 1 的核心目标：把「学段、学科、班级、学期、课表、路
 
 本模块只读使用者本地的 config.toml；仓库里分发的是 config.example.toml 模板。
 环境变量只认 ENV_OVERRIDES 里列出的白名单，其余 PHYSICS_TEACHING_* 一律忽略。
+相对路径一律以配置文件所在目录为基准解析，结果与当前工作目录无关。
 """
 
 from __future__ import annotations
@@ -74,6 +75,8 @@ class AppConfig:
     semester: SemesterConfig
     schedule: ScheduleConfig
     class_names: tuple[str, ...]
+    # 相对路径的解析基准：load_config 传配置文件所在目录，直接调用 parse_config 时为当前工作目录。
+    base_dir: Path = Path(".")
 
     @property
     def is_high_school(self) -> bool:
@@ -125,21 +128,26 @@ def load_config(
         )
     with path.open("rb") as handle:
         raw = tomllib.load(handle)
-    return parse_config(raw, env=source)
+    return parse_config(raw, env=source, base_dir=path.parent)
 
 
 def parse_config(
     raw: Mapping[str, Any],
     env: Mapping[str, str] | None = None,
+    base_dir: str | Path | None = None,
 ) -> AppConfig:
     """把已解析的 TOML 映射转成配置对象，并校验取值。
 
     传 env 时，先在内存里叠加白名单环境变量再校验；env 为 None 表示只看文件内容
     （排查配置问题时用这个模式，结果不受当前 shell 影响）。
+    base_dir 是相对路径的解析基准；为 None 时取当前工作目录。绝对路径保持原样，
+    以 ~ 开头的路径按使用者的家目录展开。
     缺省值向「可运行」倾斜；学期起止这类猜不出来的信息必须显式填写。
     """
     if env is not None:
         raw = _with_env_overrides(raw, env)
+
+    base = Path(os.path.abspath(Path.cwd() if base_dir is None else base_dir))
 
     project_raw = raw.get("project") or {}
     paths_raw = raw.get("paths") or {}
@@ -155,12 +163,12 @@ def parse_config(
     )
 
     paths = PathsConfig(
-        database=Path(str(paths_raw.get("database") or "data/physics_teaching.db")),
-        output_dir=Path(str(paths_raw.get("output_dir") or "outputs")),
+        database=_resolve_path(paths_raw.get("database") or "data/physics_teaching.db", base),
+        output_dir=_resolve_path(paths_raw.get("output_dir") or "outputs", base),
     )
 
     semester = _parse_semester(semester_raw)
-    schedule = _parse_schedule(schedule_raw, semester.starts_on)
+    schedule = _parse_schedule(schedule_raw, semester)
 
     return AppConfig(
         project=project,
@@ -168,7 +176,27 @@ def parse_config(
         semester=semester,
         schedule=schedule,
         class_names=_parse_class_names(classes_raw.get("names")),
+        base_dir=base,
     )
+
+
+def ensure_directories(config: AppConfig) -> tuple[Path, Path]:
+    """建好数据库目录与输出目录（首次运行用），返回这两个目录。
+
+    两个目录都在 .gitignore 的拒绝清单里；创建它们不会把生成物带进版本库。
+    """
+    database_dir = config.paths.database.parent
+    database_dir.mkdir(parents=True, exist_ok=True)
+    config.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    return database_dir, config.paths.output_dir
+
+
+def _resolve_path(raw: Any, base_dir: Path) -> Path:
+    """相对路径相对 base_dir 解析；绝对路径与 ~ 开头的路径按使用者写的来。"""
+    path = Path(str(raw)).expanduser()
+    if path.is_absolute():
+        return path
+    return Path(os.path.abspath(base_dir / path))
 
 
 def _with_env_overrides(raw: Mapping[str, Any], env: Mapping[str, str]) -> dict[str, Any]:
@@ -243,13 +271,18 @@ def _default_semester_name(starts_on: date, ends_on: date) -> str:
     return f"{starts_on.year}-{ends_on.year} 学年学期"
 
 
-def _parse_schedule(raw: Mapping[str, Any], semester_starts_on: date) -> ScheduleConfig:
+def _parse_schedule(raw: Mapping[str, Any], semester: SemesterConfig) -> ScheduleConfig:
     starts_raw = raw.get("starts_on")
     starts_on = (
         _parse_date(starts_raw, "schedule.starts_on")
         if str(starts_raw or "").strip()
-        else semester_starts_on
+        else semester.starts_on
     )
+    if starts_on > semester.ends_on:
+        raise ConfigError(
+            f"配置项 schedule.starts_on（{starts_on.isoformat()}）晚于 "
+            f"semester.ends_on（{semester.ends_on.isoformat()}）；课表起点应落在学期内。"
+        )
     return ScheduleConfig(
         starts_on=starts_on,
         weekdays=_parse_weekdays(raw.get("weekdays")),
