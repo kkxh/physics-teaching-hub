@@ -3,7 +3,8 @@
 # 用法：复制为 config.toml 后按自己的情况修改。
 # config.toml 已在 .gitignore 中，不会进入 Git。
 #
-# 设计原则：引擎不绑定学段、学科、班级与路径；这些都属于使用者本地配置。
+# 设计原则：引擎不绑定学段、学科、班级、学期与路径；这些都属于使用者本地配置。
+# 字段总览与可覆盖的环境变量见 README 的「配置」小节。
 
 [project]
 name = "物理教学中枢"
@@ -12,18 +13,32 @@ name = "物理教学中枢"
 # Phase 1 起，学段会决定阶段定义与文案取自哪一套 profile。
 stage = "high_school"
 subject = "physics"
+
+# IANA 时区名；教学日与教学周都按这个时区计算。
 timezone = "Asia/Shanghai"
 
 [paths]
 # 数据库与输出目录都在使用者的本地环境里，不入 Git。
+# 相对路径以「本配置文件所在目录」为基准解析（P1.2 接入；在此之前仍相对工作目录）。
 database = "data/physics_teaching.db"
 output_dir = "outputs"
+
+[semester]
+# 学期名会进报告文案；starts_on / ends_on 是必填的学期起止日期。
+name = "2026-2027 学年第一学期"
+starts_on = "2026-09-01"
+ends_on = "2027-01-22"
 
 [classes]
 # 班级由使用者自行填写；下面的班名是虚构示例。
 names = ["高一(A)班", "高一(B)班"]
 
 [schedule]
-# 课表起点与周次安排，Phase 1 接入。
+# 课表起点；省略时取 semester.starts_on。教学周从这一周开始计（P1.2 接入）。
 starts_on = "2026-09-01"
+
+# 上课日：1=周一 … 7=周日；缺省为周一至周五。
 weekdays = [1, 2, 3, 4, 5]
+
+# 节次标签，供演示课表使用；留空表示由后续模块给默认值。
+periods = ["第1节", "第2节", "第7节"]

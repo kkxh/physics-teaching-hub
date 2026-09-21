@@ -12,7 +12,7 @@
 
 骨架阶段（Phase 0）只包含工程约定，还没有教学功能：
 
-- **配置外置**：学段、学科、班级、数据库路径都由 `config.toml` 决定，见下方「学段」。
+- **配置外置**：学段、学科、学期、课表、班级、数据库路径都由 `config.toml` 决定，见下方「配置」。
 - **虚构演示数据生成器**：`seed_demo_data.py` 生成完全虚构的班级、学生、成绩与作业记录。
 - **隐私扫描**：`scripts/privacy_scan.sh` 在提交前拦住真实数据、绝对路径与凭据痕迹。
 - **持续集成**：GitHub Actions 跑测试、演示数据自检与隐私扫描。
@@ -39,17 +39,31 @@ bash scripts/privacy_scan.sh                 # 隐私扫描
 
 需要 Python 3.11 或更高版本（配置解析使用标准库 `tomllib`）。
 
-## 学段：初中还是高中
-
-引擎不绑定学段。`config.example.toml` 里的 `stage` 决定学段文案与阶段定义，目前预留两个取值：
-
-```toml
-[project]
-stage = "high_school"   # high_school（高中） | middle_school（初中）
-```
+## 配置
 
 复制 `config.example.toml` 为 `config.toml` 后按自己的情况修改；`config.toml` 不会进入 Git。
-Phase 1 会把班级、学期、课表起点、时区等一并接进来。
+它是唯一事实来源，引擎不绑定学段、学科、班级与学校作息。
+
+| 配置项 | 含义 | 可覆盖的环境变量 |
+| --- | --- | --- |
+| `project.name` | 项目名，进报告文案 | — |
+| `project.stage` | 学段：`high_school`（高中） / `middle_school`（初中） | `PHYSICS_TEACHING_STAGE` |
+| `project.subject` | 学科标识，默认 `physics` | — |
+| `project.timezone` | IANA 时区，如 `Asia/Shanghai`；教学日与教学周按此时区计算 | `PHYSICS_TEACHING_TIMEZONE` |
+| `paths.database` | 数据库路径（相对路径以配置文件所在目录为基准，P1.2 接入） | `PHYSICS_TEACHING_DATABASE` |
+| `paths.output_dir` | 报告与导出目录 | `PHYSICS_TEACHING_OUTPUT_DIR` |
+| `semester.name` | 学期名，进报告文案 | — |
+| `semester.starts_on` / `semester.ends_on` | 学期起止日期，必填 | — |
+| `classes.names` | 班级名列表 | — |
+| `schedule.starts_on` | 课表起点，省略时取学期起点 | — |
+| `schedule.weekdays` | 上课日，1=周一 … 7=周日 | — |
+| `schedule.periods` | 节次标签，供演示课表使用 | — |
+
+几点约定：
+
+- 环境变量只认上表列出的几个名字；白名单之外的 `PHYSICS_TEACHING_*` 一律忽略，避免配置来源不可追踪。
+- 换配置文件位置用 `PHYSICS_TEACHING_CONFIG=/path/to/config.toml`（Phase 1 后续命令会补 `--config` 参数）。
+- 配置不合法会直接报错并指出字段名：学段、时区、日期格式、学期起止先后、空班名、重复班名、上课日取值等都会被拦下。
 
 ## 长期路线
 

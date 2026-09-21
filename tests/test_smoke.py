@@ -1,4 +1,4 @@
-"""骨架阶段的冒烟测试：配置、演示数据与仓库约定。"""
+"""骨架阶段的冒烟测试：演示数据与仓库约定（配置用例见 test_config.py）。"""
 
 from __future__ import annotations
 
@@ -10,38 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import config_loader  # noqa: E402
 import seed_demo_data  # noqa: E402
-
-
-class ConfigTests(unittest.TestCase):
-    def test_example_config_parses_with_expected_defaults(self):
-        config = config_loader.load_config(config_loader.EXAMPLE_CONFIG_PATH)
-
-        self.assertEqual(config.project.name, "物理教学中枢")
-        self.assertEqual(config.project.stage, "high_school")
-        self.assertEqual(config.project.stage_label, "高中")
-        self.assertTrue(config.is_high_school)
-        self.assertEqual(len(config.class_names), 2)
-
-    def test_middle_school_stage_is_supported(self):
-        config = config_loader.parse_config(
-            {"project": {"stage": "middle_school"}, "classes": {"names": ["初三(1)班"]}}
-        )
-
-        self.assertEqual(config.project.stage_label, "初中")
-        self.assertFalse(config.is_high_school)
-        self.assertEqual(config.class_names, ("初三(1)班",))
-
-    def test_unknown_stage_is_rejected(self):
-        with self.assertRaises(config_loader.ConfigError):
-            config_loader.parse_config({"project": {"stage": "kindergarten"}})
-
-    def test_missing_config_file_reports_actionable_error(self):
-        with self.assertRaises(config_loader.ConfigError) as ctx:
-            config_loader.load_config("does-not-exist.toml")
-
-        self.assertIn("config.example.toml", str(ctx.exception))
 
 
 class DemoDataTests(unittest.TestCase):
