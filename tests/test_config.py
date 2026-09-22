@@ -26,6 +26,7 @@ DOCUMENTED_FIELDS: dict[str, tuple[str, ...]] = {
     "semester": ("name", "starts_on", "ends_on"),
     "classes": ("names",),
     "schedule": ("starts_on", "weekdays", "periods"),
+    "demo": ("seed", "students_per_class", "output"),
 }
 
 # 环境变量白名单：改动它就是改公开契约，必须同时更新 README 与这里。
@@ -113,12 +114,12 @@ class ExampleConfigTests(unittest.TestCase):
 class StageTests(unittest.TestCase):
     def test_middle_school_stage_is_supported(self):
         config = config_loader.parse_config(
-            minimal_raw(project={"stage": "middle_school"}, classes={"names": ["初三(1)班"]})
+            minimal_raw(project={"stage": "middle_school"}, classes={"names": ["初三(A)班"]})
         )
 
         self.assertEqual(config.project.stage_label, "初中")
         self.assertFalse(config.is_high_school)
-        self.assertEqual(config.class_names, ("初三(1)班",))
+        self.assertEqual(config.class_names, ("初三(A)班",))
 
     def test_unknown_stage_is_rejected(self):
         with self.assertRaises(config_loader.ConfigError) as ctx:
@@ -247,6 +248,57 @@ class ClassNameTests(unittest.TestCase):
         config = config_loader.parse_config(minimal_raw())
 
         self.assertEqual(config.class_names, ())
+
+
+class DemoConfigTests(unittest.TestCase):
+    def test_demo_defaults_are_usable(self):
+        config = config_loader.parse_config(minimal_raw())
+
+        self.assertEqual(config.demo.seed, config_loader.DEFAULT_DEMO_SEED)
+        self.assertEqual(
+            config.demo.students_per_class, config_loader.DEFAULT_STUDENTS_PER_CLASS
+        )
+        self.assertTrue(config.demo.exams)
+        self.assertTrue(config.demo.homework_topics)
+
+    def test_demo_settings_are_read_from_the_config(self):
+        config = config_loader.parse_config(
+            minimal_raw(
+                demo={
+                    "seed": 7,
+                    "students_per_class": 20,
+                    "output": "demo/other.json",
+                    "exams": [{"name": "演示摸底考", "progress": 0.25, "full_score": 120}],
+                    "homework_topics": ["运动学图像"],
+                }
+            ),
+            base_dir=Path("/tmp/base"),
+        )
+
+        self.assertEqual(config.demo.seed, 7)
+        self.assertEqual(config.demo.students_per_class, 20)
+        self.assertEqual(config.demo.output, Path("/tmp/base/demo/other.json"))
+        self.assertEqual(config.demo.exams[0].name, "演示摸底考")
+        self.assertEqual(config.demo.exams[0].progress, 0.25)
+        self.assertEqual(config.demo.exams[0].full_score, 120)
+        self.assertEqual(config.demo.homework_topics, ("运动学图像",))
+
+    def test_invalid_demo_values_are_rejected(self):
+        cases = {
+            "seed": ({"seed": "2026"}, "demo.seed"),
+            "students_per_class 类型": ({"students_per_class": 2.5}, "students_per_class"),
+            "students_per_class 取值": ({"students_per_class": 0}, "大于 0"),
+            "exams 结构": ({"exams": ["演示考试"]}, "demo.exams[0]"),
+            "exams 进度": ({"exams": [{"name": "演示考试", "progress": 1.5}]}, "progress"),
+            "exams 满分": ({"exams": [{"name": "演示考试", "full_score": 0}]}, "full_score"),
+            "homework_topics": ({"homework_topics": ["  "]}, "homework_topics[0]"),
+        }
+
+        for label, (demo, needle) in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaises(config_loader.ConfigError) as ctx:
+                    config_loader.parse_config(minimal_raw(demo=demo))
+                self.assertIn(needle, str(ctx.exception))
 
 
 class EnvOverrideTests(unittest.TestCase):

@@ -33,7 +33,7 @@ git clone https://github.com/kkxh/physics-teaching-hub.git
 cd physics-teaching-hub
 
 python3 -m unittest discover -s tests -t .   # 跑测试
-python3 seed_demo_data.py                    # 生成虚构演示数据（demo/，不入 Git）
+python3 seed_demo_data.py                    # 生成虚构演示数据（没 config.toml 时用示例配置）
 python3 seed_demo_data.py --check            # 演示数据自检
 bash scripts/privacy_scan.sh                 # 隐私扫描
 ```
@@ -60,6 +60,9 @@ bash scripts/privacy_scan.sh                 # 隐私扫描
 | `schedule.starts_on` | 课表起点，省略时取学期起点 | — |
 | `schedule.weekdays` | 上课日，1=周一 … 7=周日 | — |
 | `schedule.periods` | 节次标签，供演示课表使用 | — |
+| `demo.seed` | 演示数据的随机种子，同一份配置永远生成同一份数据 | — |
+| `demo.students_per_class` | 演示数据每班人数 | — |
+| `demo.output` | 演示数据落盘位置，默认 `demo/demo_dataset.json` | — |
 
 几点约定：
 
@@ -94,6 +97,13 @@ ends_on = "2026-11-06"
 - 面向使用者的文字集中在 [labels/zh-CN.toml](labels/zh-CN.toml)：学科名、学段名、阶段名、学期/教学周/作业/订正/错因等术语，以及演示数据的提示语。代码里只出现 key（如 `phases.new_lesson`）。
 - `[project] locale` 决定取哪一份文案表；想换成自己的说法，复制一份改名（例如 `my-zh.toml`），再用 `[project] labels_dir` 指向它所在的目录（相对路径按配置文件所在目录解析）。
 - 缺 key、locale 文件不存在、文案不是字符串或写成空串，都会直接报错，错误信息带上文件路径与 key 名——不会静默显示空白。
+
+### 演示数据
+
+- `seed_demo_data.py` 按配置生成虚构数据：班级取 `[classes] names`，人数、种子、考试、作业主题与落盘位置取 `[demo]`。
+- 配置文件按「`--config` → `PHYSICS_TEACHING_CONFIG` → 当前目录的 `config.toml` → 仓库自带的 `config.example.toml`」的顺序找；全新 clone 不动配置也能先跑起来看效果。
+- 考试与作业日期按学期进度自动落点（`[[demo.exams]]` 的 `progress` 是 0~1 的学期进度），永远落在 `[semester]` 范围内，不用手改日期。
+- 生成结果只写在本机（默认 `demo/`，已在 `.gitignore` 里）；姓名一律是「前缀 + 两位序号」的虚构样式，自检会拦住不符合模式的姓名。
 
 ## 长期路线
 

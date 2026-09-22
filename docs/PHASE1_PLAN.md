@@ -1,6 +1,6 @@
 # Phase 1 小步清单：通用化地基
 
-> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21），P1.3、P1.4 已完成（2026-09-22）。每完成一步，就把对应小节标题里的状态补上并写日期。
+> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21），P1.3、P1.4 已完成（2026-09-22），P1.5 已完成（2026-09-23）。每完成一步，就把对应小节标题里的状态补上并写日期。
 > 范围锚点：[ROADMAP.md](ROADMAP.md) 的 Phase 1。本文件只细化步骤，不扩大范围。
 
 ## 执行约定
@@ -72,7 +72,7 @@
 
 改动文件：`labels/zh-CN.toml`（新增）、`labels.py`（新增）、`config_loader.py`、`stage_profiles.py`、`config.example.toml`、`seed_demo_data.py`、`tests/test_labels.py`（新增）、`tests/test_stage_profiles.py`、`tests/test_smoke.py`、`tests/test_config.py`、`README.md`。
 
-## P1.5 演示数据配置化（未开始）
+## P1.5 演示数据配置化（已完成 2026-09-23）
 
 目标：演示数据完全由配置驱动（班级、人数、种子、考试、作业、输出路径、学期范围），保持确定性；演示通道强制虚构姓名。
 
@@ -84,7 +84,7 @@
 - 人数与配置不符、或姓名不符合虚构模式时，自检返回问题清单并以非零退出。
 - 演示数据的日期全部落在 `[semester]` 范围内。
 
-改动文件：`seed_demo_data.py`、`config_loader.py`（新增 `[demo]`）、`config.example.toml`、`tests/test_demo_data.py`、`tests/test_smoke.py`、`README.md`。
+改动文件：`seed_demo_data.py`、`config_loader.py`（新增 `[demo]`）、`config.example.toml`、`tests/test_demo_data.py`（新增）、`tests/test_smoke.py`、`tests/test_config.py`、`tests/test_labels.py`、`README.md`。
 
 ## P1.6 首次可运行闭环（未开始）
 

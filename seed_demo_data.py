@@ -4,43 +4,34 @@
 真实课堂数据只存在于维护者的私有系统里，永不进入本仓库。
 
 用法：
-    python3 seed_demo_data.py                  # 写入 demo/demo_dataset.json
-    python3 seed_demo_data.py --out other.json # 写到别处
-    python3 seed_demo_data.py --check          # 只做自检，不落盘（CI 用）
+    python3 seed_demo_data.py                     # 按配置写入 [demo] output
+    python3 seed_demo_data.py --config my.toml    # 指定配置文件
+    python3 seed_demo_data.py --out other.json    # 写到别处（相对当前目录）
+    python3 seed_demo_data.py --check             # 只做自检，不落盘（CI 用）
 
-数据集是确定性的：同一个 DEMO_SEED 永远生成同一份内容，便于测试与截图复现。
+配置文件按「--config → config.toml → config.example.toml」的顺序找：没有 config.toml 时
+用仓库自带的示例配置，保证 clone 下来就能跑。
+
+班级、人数、种子、考试、作业主题与落盘位置都来自配置；数据集是确定性的——
+同一份配置永远生成同一份内容，便于测试与截图复现。
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
+import os
 import random
 import re
 import sys
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-import labels as labels_module
+import config_loader
 
-DATASET_VERSION = "demo.v1"
-DEMO_SEED = 20260921
-DEFAULT_OUTPUT = Path("demo/demo_dataset.json")
-
-CLASS_NAMES = ("高一(A)班", "高一(B)班")
-STUDENTS_PER_CLASS = 30
-
-EXAMS = (
-    {"key": "demo-midterm", "name": "演示期中考试", "date": "2026-04-28", "full_score": 100},
-    {"key": "demo-monthly", "name": "演示月考", "date": "2026-05-26", "full_score": 100},
-)
-
-HOMEWORK_TOPICS = (
-    "运动学图像",
-    "牛顿第二定律",
-    "机械能守恒",
-    "电路分析",
-)
+DATASET_VERSION = "demo.v2"
 
 ERROR_TAGS = ("模型选择", "图像读取", "计算失误", "表达不规范", "概念混淆")
 
@@ -55,25 +46,70 @@ def student_name(index: int, prefix: str) -> str:
     return f"{prefix}{index:02d}"
 
 
-def build_dataset(
-    seed: int = DEMO_SEED,
-    labels: labels_module.Labels | None = None,
-) -> dict[str, Any]:
-    """构建演示数据集；结构稳定，改动需升级 DATASET_VERSION。
+def date_at_progress(starts_on: date, ends_on: date, progress: float) -> date:
+    """按学期进度取日期：0 是学期第一天，1 是最后一天，结果一定落在学期内。"""
+    span = (ends_on - starts_on).days
+    offset = round(span * progress)
+    return starts_on + timedelta(days=min(max(offset, 0), span))
 
-    演示文案（提示语、姓名前缀、作业标题前缀）按 labels 取；省略时用仓库自带的文案表。
+
+def resolve_demo_config_path(
+    explicit: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> Path:
+    """演示数据用哪份配置：--config → 环境变量 → config.toml → 仓库自带的示例配置。"""
+    source = os.environ if env is None else env
+    if explicit is None and not source.get(config_loader.CONFIG_ENV_VAR):
+        # 没显式指定、也没设环境变量：优先当前目录的 config.toml，找不到就用示例配置，
+        # 这样 clone 下来什么都不改也能跑通演示。示例配置跟着代码走，与当前目录无关。
+        if not config_loader.DEFAULT_CONFIG_PATH.is_file() and config_loader.EXAMPLE_CONFIG_FILE.is_file():
+            return config_loader.EXAMPLE_CONFIG_FILE
+    return config_loader.resolve_config_path(explicit, source)
+
+
+def load_config_for_demo(
+    explicit: str | Path | None = None,
+    *,
+    seed: int | None = None,
+    output: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> config_loader.AppConfig:
+    """读配置；--seed / --out 只覆盖演示数据相关的字段。"""
+    config = config_loader.load_config(resolve_demo_config_path(explicit, env), env=env)
+    demo = config.demo
+    if seed is not None:
+        demo = dataclasses.replace(demo, seed=seed)
+    if output is not None:
+        # --out 是命令行参数，相对当前工作目录解析。
+        demo = dataclasses.replace(
+            demo, output=Path(os.path.abspath(Path(str(output)).expanduser()))
+        )
+    if demo is config.demo:
+        return config
+    return dataclasses.replace(config, demo=demo)
+
+
+def build_dataset(config: config_loader.AppConfig) -> dict[str, Any]:
+    """按配置构建演示数据集；同一份配置永远生成同一份内容。
+
+    结构稳定，改动需升级 DATASET_VERSION。演示文案（提示语、姓名前缀、作业标题前缀）
+    按配置里的文案表取。
     """
-    labels = labels or labels_module.load_labels()
+    labels = config.labels
     name_prefix = labels.get("demo.student_name_prefix")
     homework_prefix = labels.get("demo.homework_prefix")
+    if not config.class_names:
+        raise config_loader.ConfigError(
+            "演示数据需要班级：请在配置文件的 [classes] names 里至少写一个虚构班名。"
+        )
 
-    rng = random.Random(seed)
+    rng = random.Random(config.demo.seed)
 
     classes: list[dict[str, Any]] = []
     roster: list[tuple[str, str]] = []
-    for class_name in CLASS_NAMES:
+    for class_name in config.class_names:
         students = []
-        for position in range(1, STUDENTS_PER_CLASS + 1):
+        for position in range(1, config.demo.students_per_class + 1):
             student = {
                 "id": f"{class_name}-{position:02d}",
                 "name": student_name(position, name_prefix),
@@ -84,17 +120,28 @@ def build_dataset(
         classes.append({"name": class_name, "students": students})
 
     exams: list[dict[str, Any]] = []
-    for exam in EXAMS:
+    for index, exam in enumerate(config.demo.exams, start=1):
         scores = []
         for _class_name, student_id in roster:
             base = rng.gauss(mu=72.0, sigma=13.0)
-            score = max(0, min(exam["full_score"], round(base)))
+            score = max(0, min(exam.full_score, round(base)))
             scores.append({"student_id": student_id, "score": score})
-        exams.append({**exam, "scores": scores})
+        exams.append(
+            {
+                "key": f"demo-exam-{index}",
+                "name": exam.name,
+                "date": date_at_progress(
+                    config.semester.starts_on, config.semester.ends_on, exam.progress
+                ).isoformat(),
+                "full_score": exam.full_score,
+                "scores": scores,
+            }
+        )
 
+    topics = config.demo.homework_topics
     homework: list[dict[str, Any]] = []
-    for index, topic in enumerate(HOMEWORK_TOPICS):
-        class_name = CLASS_NAMES[index % len(CLASS_NAMES)]
+    for index, topic in enumerate(topics):
+        class_name = config.class_names[index % len(config.class_names)]
         records = []
         for _cls, student_id in roster:
             if not student_id.startswith(class_name):
@@ -108,22 +155,31 @@ def build_dataset(
             records.append(record)
         homework.append(
             {
-                "date": f"2026-05-{11 + index:02d}",
+                "date": date_at_progress(
+                    config.semester.starts_on,
+                    config.semester.ends_on,
+                    (index + 1) / (len(topics) + 1),
+                ).isoformat(),
                 "class": class_name,
                 "topic": f"{homework_prefix}：{topic}",
                 "records": records,
             }
         )
 
+    periods = config.schedule.periods or (None,)
     schedule = [
-        {"class": class_name, "weekday": weekday, "period": period}
-        for class_name in CLASS_NAMES
-        for weekday, period in ((1, "第2节"), (3, "第1节"), (5, "第7节"))
+        {
+            "class": class_name,
+            "weekday": weekday,
+            "period": periods[index % len(periods)],
+        }
+        for class_name in config.class_names
+        for index, weekday in enumerate(config.schedule.weekdays)
     ]
 
     return {
         "version": DATASET_VERSION,
-        "seed": seed,
+        "seed": config.demo.seed,
         "notice": labels.get("demo.notice"),
         "classes": classes,
         "exams": exams,
@@ -134,25 +190,29 @@ def build_dataset(
 
 def check_dataset(
     dataset: dict[str, Any],
-    labels: labels_module.Labels | None = None,
+    config: config_loader.AppConfig,
 ) -> list[str]:
-    """返回问题列表；空列表表示通过自检。"""
-    labels = labels or labels_module.load_labels()
+    """返回问题列表；空列表表示通过自检。要给同一份 config 才能复核可复现性。"""
+    labels = config.labels
     pattern = fictional_name_pattern(labels.get("demo.student_name_prefix"))
+    semester = config.semester
     problems: list[str] = []
 
     if dataset.get("version") != DATASET_VERSION:
         problems.append(f"数据集版本不是 {DATASET_VERSION}")
 
     classes = dataset.get("classes") or []
-    if len(classes) != len(CLASS_NAMES):
-        problems.append(f"班级数量应为 {len(CLASS_NAMES)}，实际为 {len(classes)}")
+    if len(classes) != len(config.class_names):
+        problems.append(f"班级数量应为 {len(config.class_names)}，实际为 {len(classes)}")
 
     student_ids: list[str] = []
     for klass in classes:
         students = klass.get("students") or []
-        if len(students) != STUDENTS_PER_CLASS:
-            problems.append(f"{klass.get('name')} 的学生数应为 {STUDENTS_PER_CLASS}")
+        if len(students) != config.demo.students_per_class:
+            problems.append(
+                f"{klass.get('name')} 的学生数应为 {config.demo.students_per_class}，"
+                f"实际为 {len(students)}"
+            )
         for student in students:
             student_ids.append(student["id"])
             if not pattern.match(student["name"]):
@@ -161,23 +221,62 @@ def check_dataset(
     for exam in dataset.get("exams") or []:
         if len(exam.get("scores") or []) != len(student_ids):
             problems.append(f"{exam.get('key')} 的成绩条数与总人数不一致")
+        problems.extend(
+            _date_problems(exam.get("date"), semester, f"{exam.get('name')} 的日期")
+        )
 
-    if build_dataset(dataset.get("seed", DEMO_SEED), labels=labels) != dataset:
-        problems.append("数据集不可复现：同一 seed 生成了不同结果")
+    for item in dataset.get("homework") or []:
+        problems.extend(
+            _date_problems(item.get("date"), semester, f"{item.get('class')} 的作业日期")
+        )
+
+    if build_dataset(config) != dataset:
+        problems.append("数据集不可复现：同一份配置生成了不同结果")
 
     return problems
 
 
+def _date_problems(raw: Any, semester: config_loader.SemesterConfig, label: str) -> list[str]:
+    if not raw:
+        return [f"{label}缺失"]
+    day = date.fromisoformat(str(raw))
+    if not semester.starts_on <= day <= semester.ends_on:
+        return [
+            f"{label} {day.isoformat()} 落在学期 "
+            f"{semester.starts_on.isoformat()} ~ {semester.ends_on.isoformat()} 之外"
+        ]
+    return []
+
+
+def write_dataset(dataset: dict[str, Any], path: Path) -> Path:
+    """落盘演示数据；父目录不存在就建。同一份数据集写出来逐字节一致。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(dataset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="生成虚构演示数据")
-    parser.add_argument("--out", default=str(DEFAULT_OUTPUT), help="输出路径")
-    parser.add_argument("--seed", type=int, default=DEMO_SEED, help="随机种子")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="配置文件；省略时依次找 config.toml、config.example.toml",
+    )
+    parser.add_argument("--out", default=None, help="覆盖 [demo] output；相对当前目录")
+    parser.add_argument("--seed", type=int, default=None, help="覆盖 [demo] seed")
     parser.add_argument("--check", action="store_true", help="只自检，不落盘")
     args = parser.parse_args(argv)
 
-    labels = labels_module.load_labels()
-    dataset = build_dataset(args.seed, labels=labels)
-    problems = check_dataset(dataset, labels=labels)
+    try:
+        config = load_config_for_demo(args.config, seed=args.seed, output=args.out)
+        dataset = build_dataset(config)
+    except config_loader.ConfigError as exc:
+        print(f"[配置错误] {exc}", file=sys.stderr)
+        return 2
+
+    problems = check_dataset(dataset, config)
     if problems:
         for problem in problems:
             print(f"[自检失败] {problem}", file=sys.stderr)
@@ -185,14 +284,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         students = sum(len(k["students"]) for k in dataset["classes"])
-        print(f"演示数据自检通过：{len(dataset['classes'])} 个虚构班级 / {students} 名学生")
+        print(
+            f"演示数据自检通过：{len(dataset['classes'])} 个虚构班级 / {students} 名学生"
+            f"（配置：{resolve_demo_config_path(args.config)}）"
+        )
         return 0
 
-    output = Path(args.out)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(dataset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    output = write_dataset(dataset, config.demo.output)
     print(f"已写入演示数据：{output}（虚构内容，不入 Git）")
     return 0
 

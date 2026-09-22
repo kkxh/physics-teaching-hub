@@ -183,9 +183,16 @@ class CustomLabelsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             write_fixture_labels(directory, CUSTOM_LOCALE, CUSTOM_LABELS)
-            custom = labels_module.load_labels(CUSTOM_LOCALE, directory)
+            config = config_loader.parse_config(
+                {
+                    "project": {"locale": CUSTOM_LOCALE, "labels_dir": str(directory)},
+                    "semester": dict(SEMESTER),
+                    "classes": {"names": ["初三(A)班"]},
+                    "demo": {"students_per_class": 3},
+                }
+            )
 
-            dataset = seed_demo_data.build_dataset(labels=custom)
+            dataset = seed_demo_data.build_dataset(config)
 
             self.assertEqual(dataset["notice"], "这份演示数据全部虚构。")
             students = [s for k in dataset["classes"] for s in k["students"]]
@@ -193,7 +200,7 @@ class CustomLabelsTests(unittest.TestCase):
             self.assertTrue(
                 all(item["topic"].startswith("演示练习") for item in dataset["homework"])
             )
-            self.assertEqual(seed_demo_data.check_dataset(dataset, labels=custom), [])
+            self.assertEqual(seed_demo_data.check_dataset(dataset, config), [])
 
     def test_custom_labels_change_the_config_wording(self):
         with tempfile.TemporaryDirectory() as tmp:

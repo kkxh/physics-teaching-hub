@@ -23,12 +23,25 @@ from stage_profiles import VALID_STAGES, Phase, default_phases, get_profile
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
 EXAMPLE_CONFIG_PATH = Path("config.example.toml")
+# 仓库自带示例配置的绝对路径：跟着代码走，不跟随使用者的工作目录。
+EXAMPLE_CONFIG_FILE = Path(__file__).resolve().parent / EXAMPLE_CONFIG_PATH
 CONFIG_ENV_VAR = "PHYSICS_TEACHING_CONFIG"
 
 DEFAULT_STAGE = "high_school"
 DEFAULT_SUBJECT = "physics"
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_WEEKDAYS: tuple[int, ...] = (1, 2, 3, 4, 5)
+
+# 演示数据的缺省值：够跑通「建库 → 导入 → 报告」这条最小闭环即可。
+DEFAULT_DEMO_SEED = 20260921
+DEFAULT_STUDENTS_PER_CLASS = 30
+DEFAULT_DEMO_OUTPUT = "demo/demo_dataset.json"
+DEFAULT_HOMEWORK_TOPICS: tuple[str, ...] = (
+    "运动学图像",
+    "牛顿第二定律",
+    "机械能守恒",
+    "电路分析",
+)
 
 # 环境变量白名单：变量名 → 它覆盖的配置项（dotted key）。
 # 只有这里列出的变量能参与配置；白名单之外的变量一律忽略，
@@ -69,6 +82,7 @@ class AppConfig:
     paths: PathsConfig
     semester: SemesterConfig
     schedule: ScheduleConfig
+    demo: DemoConfig
     class_names: tuple[str, ...]
     labels: Labels
     # 相对路径的解析基准：load_config 传配置文件所在目录，直接调用 parse_config 时为当前工作目录。
@@ -97,6 +111,32 @@ class ScheduleConfig:
     starts_on: date
     weekdays: tuple[int, ...]
     periods: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DemoExam:
+    """演示考试：progress 是学期进度（0~1），用来把日期落在学期内。"""
+
+    name: str
+    progress: float
+    full_score: int
+
+
+@dataclass(frozen=True)
+class DemoConfig:
+    """演示数据生成器的参数；生成的 JSON 不入 Git。"""
+
+    seed: int
+    students_per_class: int
+    output: Path
+    exams: tuple[DemoExam, ...]
+    homework_topics: tuple[str, ...]
+
+
+DEFAULT_DEMO_EXAMS: tuple[DemoExam, ...] = (
+    DemoExam(name="演示期中考试", progress=0.45, full_score=100),
+    DemoExam(name="演示月考", progress=0.8, full_score=100),
+)
 
 
 def resolve_config_path(
@@ -152,6 +192,7 @@ def parse_config(
     classes_raw = raw.get("classes") or {}
     semester_raw = raw.get("semester") or {}
     schedule_raw = raw.get("schedule") or {}
+    demo_raw = raw.get("demo") or {}
 
     locale = str(project_raw.get("locale") or DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
     labels = _load_labels(project_raw.get("labels_dir"), base, locale)
@@ -177,12 +218,14 @@ def parse_config(
     semester = _parse_semester(semester_raw)
     schedule = _parse_schedule(schedule_raw, semester)
     phases = _parse_phases(raw.get("phases"), semester, stage, labels)
+    demo = _parse_demo(demo_raw, base)
 
     return AppConfig(
         project=project,
         paths=paths,
         semester=semester,
         schedule=schedule,
+        demo=demo,
         class_names=_parse_class_names(classes_raw.get("names")),
         labels=labels,
         base_dir=base,
@@ -465,3 +508,89 @@ def _validate_phases(phases: list[Phase], semester: SemesterConfig) -> None:
             f"{phases[-1].ends_on.isoformat()}，而学期到 "
             f"{semester.ends_on.isoformat()} 才结束。"
         )
+
+
+def _parse_demo(raw: Mapping[str, Any], base_dir: Path) -> DemoConfig:
+    """解析 [demo]；不写就用缺省值，够跑通最小闭环。"""
+    seed_raw = raw.get("seed", DEFAULT_DEMO_SEED)
+    if isinstance(seed_raw, bool) or not isinstance(seed_raw, int):
+        raise ConfigError(f"配置项 demo.seed 应为整数，收到的不是整数：{seed_raw!r}。")
+
+    per_class_raw = raw.get("students_per_class", DEFAULT_STUDENTS_PER_CLASS)
+    if isinstance(per_class_raw, bool) or not isinstance(per_class_raw, int):
+        raise ConfigError(
+            f"配置项 demo.students_per_class 应为正整数，收到的不是整数：{per_class_raw!r}。"
+        )
+    if per_class_raw <= 0:
+        raise ConfigError(
+            f"配置项 demo.students_per_class 必须大于 0，当前为 {per_class_raw}。"
+        )
+
+    return DemoConfig(
+        seed=seed_raw,
+        students_per_class=per_class_raw,
+        output=_resolve_path(raw.get("output") or DEFAULT_DEMO_OUTPUT, base_dir),
+        exams=_parse_demo_exams(raw.get("exams")),
+        homework_topics=_parse_demo_topics(raw.get("homework_topics")),
+    )
+
+
+def _parse_demo_exams(raw: Any) -> tuple[DemoExam, ...]:
+    if raw is None or raw == []:
+        return DEFAULT_DEMO_EXAMS
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
+        raise ConfigError(
+            "配置项 demo.exams 应为 [[demo.exams]] 表数组，每张表写 name、progress、full_score。"
+        )
+
+    exams: list[DemoExam] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            raise ConfigError(f"配置项 demo.exams[{index}] 应是一张 [[demo.exams]] 表。")
+
+        name = str(item.get("name") or "").strip()
+        if not name:
+            raise ConfigError(f"配置项 demo.exams[{index}].name 不能为空。")
+
+        progress_raw = item.get("progress", 0.5)
+        if isinstance(progress_raw, bool) or not isinstance(progress_raw, (int, float)):
+            raise ConfigError(
+                f"配置项 demo.exams[{index}].progress 应为 0~1 的小数，收到：{progress_raw!r}。"
+            )
+        progress = float(progress_raw)
+        if not 0.0 <= progress <= 1.0:
+            raise ConfigError(
+                f"配置项 demo.exams[{index}].progress 超出范围：{progress}；取值 0~1，"
+                "表示这场考试在学期里的进度。"
+            )
+
+        full_score_raw = item.get("full_score", 100)
+        if isinstance(full_score_raw, bool) or not isinstance(full_score_raw, int):
+            raise ConfigError(
+                f"配置项 demo.exams[{index}].full_score 应为正整数，收到：{full_score_raw!r}。"
+            )
+        if full_score_raw <= 0:
+            raise ConfigError(
+                f"配置项 demo.exams[{index}].full_score 必须大于 0，当前为 {full_score_raw}。"
+            )
+
+        exams.append(DemoExam(name=name, progress=progress, full_score=full_score_raw))
+
+    return tuple(exams)
+
+
+def _parse_demo_topics(raw: Any) -> tuple[str, ...]:
+    if raw is None or raw == []:
+        return DEFAULT_HOMEWORK_TOPICS
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
+        raise ConfigError(
+            "配置项 demo.homework_topics 应为字符串数组，例如 [\"运动学图像\", \"电路分析\"]。"
+        )
+
+    topics: list[str] = []
+    for index, item in enumerate(raw):
+        topic = str(item).strip()
+        if not topic:
+            raise ConfigError(f"配置项 demo.homework_topics[{index}] 不能为空。")
+        topics.append(topic)
+    return tuple(topics)
