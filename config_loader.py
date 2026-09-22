@@ -153,6 +153,22 @@ def resolve_config_path(
     return DEFAULT_CONFIG_PATH
 
 
+def resolve_cli_config_path(
+    explicit: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> Path:
+    """命令行用哪份配置：--config → 环境变量 → 当前目录 config.toml → 仓库自带示例配置。
+
+    最后一档是为了让全新 clone 不动配置就能跑通演示；示例配置跟着代码走，
+    与当前工作目录无关。显式指定或设了环境变量时不做这个回退。
+    """
+    source = os.environ if env is None else env
+    if explicit is None and not source.get(CONFIG_ENV_VAR):
+        if not DEFAULT_CONFIG_PATH.is_file() and EXAMPLE_CONFIG_FILE.is_file():
+            return EXAMPLE_CONFIG_FILE
+    return resolve_config_path(explicit, source)
+
+
 def load_config(
     explicit: str | Path | None = None,
     env: Mapping[str, str] | None = None,

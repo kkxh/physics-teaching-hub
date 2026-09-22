@@ -1,6 +1,6 @@
 # Phase 1 小步清单：通用化地基
 
-> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21），P1.3、P1.4 已完成（2026-09-22），P1.5 已完成（2026-09-23）。每完成一步，就把对应小节标题里的状态补上并写日期。
+> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21），P1.3、P1.4 已完成（2026-09-22），P1.5、P1.6 已完成（2026-09-23）。每完成一步，就把对应小节标题里的状态补上并写日期。
 > 范围锚点：[ROADMAP.md](ROADMAP.md) 的 Phase 1。本文件只细化步骤，不扩大范围。
 
 ## 执行约定
@@ -86,7 +86,7 @@
 
 改动文件：`seed_demo_data.py`、`config_loader.py`（新增 `[demo]`）、`config.example.toml`、`tests/test_demo_data.py`（新增）、`tests/test_smoke.py`、`tests/test_config.py`、`tests/test_labels.py`、`README.md`。
 
-## P1.6 首次可运行闭环（未开始）
+## P1.6 首次可运行闭环（已完成 2026-09-23）
 
 目标：三条命令跑通最小闭环——`python3 init_db.py --demo`（建库 + 灌入虚构名单）→ `python3 import_scores.py`（导入虚构成绩）→ `python3 make_report.py`（把 Markdown 报告写到 `outputs/`）。
 
@@ -100,7 +100,7 @@
 - `requirements.txt` 保持为空（只用标准库），CI 从零安装即可跑通。
 - README 快速开始改成这三条命令，照抄即可跑通。
 
-改动文件：`init_db.py`、`import_scores.py`、`make_report.py`（三个新增）、`schema/phase1_schema.sql`（新增）、`tests/test_phase1_loop.py`（新增）、`README.md`、`docs/ROADMAP.md`、`docs/MIGRATION_LEDGER.md`。
+改动文件：`init_db.py`、`import_scores.py`、`make_report.py`（三个新增）、`schema/phase1_schema.sql`（新增）、`tests/test_phase1_loop.py`（新增）、`seed_demo_data.py`、`config_loader.py`、`tests/test_labels.py`、`tests/test_demo_data.py`、`README.md`、`docs/ROADMAP.md`、`docs/MIGRATION_LEDGER.md`。
 
 ## P1.7 收口（未开始）
 

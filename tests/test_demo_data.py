@@ -311,7 +311,7 @@ class CommandLineTests(unittest.TestCase):
     def test_falls_back_to_the_example_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             with chdir(Path(tmp)):
-                path = seed_demo_data.resolve_demo_config_path()
+                path = config_loader.resolve_cli_config_path()
 
                 with quiet():
                     code = seed_demo_data.main(["--check"])
@@ -325,7 +325,7 @@ class CommandLineTests(unittest.TestCase):
             write_config(base, TEMP_CONFIG)
 
             with chdir(base):
-                path = seed_demo_data.resolve_demo_config_path()
+                path = config_loader.resolve_cli_config_path()
 
         self.assertEqual(path, config_loader.DEFAULT_CONFIG_PATH)
 

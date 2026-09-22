@@ -53,20 +53,6 @@ def date_at_progress(starts_on: date, ends_on: date, progress: float) -> date:
     return starts_on + timedelta(days=min(max(offset, 0), span))
 
 
-def resolve_demo_config_path(
-    explicit: str | Path | None = None,
-    env: Mapping[str, str] | None = None,
-) -> Path:
-    """演示数据用哪份配置：--config → 环境变量 → config.toml → 仓库自带的示例配置。"""
-    source = os.environ if env is None else env
-    if explicit is None and not source.get(config_loader.CONFIG_ENV_VAR):
-        # 没显式指定、也没设环境变量：优先当前目录的 config.toml，找不到就用示例配置，
-        # 这样 clone 下来什么都不改也能跑通演示。示例配置跟着代码走，与当前目录无关。
-        if not config_loader.DEFAULT_CONFIG_PATH.is_file() and config_loader.EXAMPLE_CONFIG_FILE.is_file():
-            return config_loader.EXAMPLE_CONFIG_FILE
-    return config_loader.resolve_config_path(explicit, source)
-
-
 def load_config_for_demo(
     explicit: str | Path | None = None,
     *,
@@ -75,7 +61,9 @@ def load_config_for_demo(
     env: Mapping[str, str] | None = None,
 ) -> config_loader.AppConfig:
     """读配置；--seed / --out 只覆盖演示数据相关的字段。"""
-    config = config_loader.load_config(resolve_demo_config_path(explicit, env), env=env)
+    config = config_loader.load_config(
+        config_loader.resolve_cli_config_path(explicit, env), env=env
+    )
     demo = config.demo
     if seed is not None:
         demo = dataclasses.replace(demo, seed=seed)
@@ -257,6 +245,69 @@ def write_dataset(dataset: dict[str, Any], path: Path) -> Path:
     return path
 
 
+def load_or_create_dataset(
+    config: config_loader.AppConfig,
+    *,
+    regenerate: bool = False,
+) -> dict[str, Any]:
+    """读配置里指定的演示数据集；文件不存在（或要求重新生成）就先按配置生成再落盘。"""
+    path = config.demo.output
+    if regenerate or not path.is_file():
+        dataset = build_dataset(config)
+        write_dataset(dataset, path)
+        return dataset
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise config_loader.ConfigError(
+            f"演示数据集不是合法的 JSON：{path}（{exc}）；"
+            "删掉它或重跑 seed_demo_data.py 重新生成。"
+        ) from exc
+
+
+def ensure_fictional_names(
+    dataset: Mapping[str, Any],
+    config: config_loader.AppConfig,
+) -> None:
+    """名单必须全是虚构姓名；Phase 1 不接受任何真实姓名。"""
+    pattern = fictional_name_pattern(
+        config.labels.get("demo.student_name_prefix")
+    )
+    bad = [
+        str(student.get("name") or "")
+        for klass in dataset.get("classes") or []
+        for student in klass.get("students") or []
+        if not pattern.match(str(student.get("name") or ""))
+    ]
+    if bad:
+        shown = "、".join(bad[:3])
+        more = f" 等 {len(bad)} 个" if len(bad) > 3 else ""
+        raise config_loader.ConfigError(
+            f"Phase 1 仅支持虚构演示数据：发现非虚构姓名 {shown}{more}；"
+            "请用 seed_demo_data.py 生成的数据集。"
+        )
+
+
+def validate_dataset_for_import(
+    dataset: Mapping[str, Any],
+    config: config_loader.AppConfig,
+) -> None:
+    """导入前的把关：只接受虚构演示数据，而且必须与当前配置对得上。"""
+    ensure_fictional_names(dataset, config)
+
+    if dataset.get("version") != DATASET_VERSION:
+        raise config_loader.ConfigError(
+            f"演示数据集版本不是 {DATASET_VERSION}：{config.demo.output}；"
+            "删掉它或重跑 seed_demo_data.py 重新生成。"
+        )
+
+    if build_dataset(config) != dataset:
+        raise config_loader.ConfigError(
+            f"演示数据集与当前配置不一致：{config.demo.output}；"
+            "改过班级、人数或 seed 之后请重跑 seed_demo_data.py 重新生成。"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="生成虚构演示数据")
     parser.add_argument(
@@ -286,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         students = sum(len(k["students"]) for k in dataset["classes"])
         print(
             f"演示数据自检通过：{len(dataset['classes'])} 个虚构班级 / {students} 名学生"
-            f"（配置：{resolve_demo_config_path(args.config)}）"
+            f"（配置：{config_loader.resolve_cli_config_path(args.config)}）"
         )
         return 0
 

@@ -75,7 +75,10 @@ homework_prefix = "演示练习"
 FORBIDDEN_WORDS = ("物理", "高中", "初中")
 SCANNED_MODULES = (
     "config_loader.py",
+    "import_scores.py",
+    "init_db.py",
     "labels.py",
+    "make_report.py",
     "stage_profiles.py",
     "teaching_calendar.py",
     "seed_demo_data.py",

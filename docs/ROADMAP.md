@@ -1,6 +1,7 @@
 # 长期路线
 
-> 状态：**Phase 0 已完成（骨架）**，下一步进入 Phase 1。
+> 状态：**Phase 1 进行中**——P1.1～P1.6 已完成（配置、路径与时间、学段与阶段、文案收口、演示数据配置化、最小闭环），下一步 P1.7 收口。
+> 小步清单与每步验收见 [PHASE1_PLAN.md](PHASE1_PLAN.md)。
 > 本文件是所有长期对话的路线锚点：换会话、换 agent 时先读这里。
 
 ## 定位（不要偏离）
@@ -41,7 +42,17 @@
 4. 学科文案收口：散落的学科与学段字样收进配置或 labels 文件。
 5. 首次可运行：能用虚构数据完成「建库 → 导入成绩 → 生成一份报告」的最小闭环。
 
-验收：全新机器 clone 后，三条命令能看到基于虚构数据的输出。
+验收：全新机器 clone 后，三条命令能看到基于虚构数据的输出（不改配置也能跑，会自动用示例配置）：
+
+```bash
+python3 init_db.py --demo      # 建库 + 灌入虚构名单
+python3 import_scores.py       # 导入演示成绩
+python3 make_report.py         # 生成 Markdown 报告（outputs/）
+```
+
+**临时 schema 声明**：最小闭环用的 `schema/phase1_schema.sql` 是**临时** schema
+（库里 `meta.schema_version = 'phase1-temp'`）。Phase 2 会用正式的模块化 schema 替换或扩展它，
+表名、字段与约束都不承诺兼容，请勿据此做长期集成或数据迁移。
 
 ### Phase 2 — 逐模块搬运（长期主线）
 

@@ -2,7 +2,7 @@
 
 面向中学物理教师的本地教学数据中枢：把课堂记录、作业与订正、错因、学生画像、阶段巡检和练习推荐放进同一个本地数据库，由命令行与本地看板驱动，数据不出本机。
 
-> **当前状态：v0.0.1，骨架阶段。**
+> **当前状态：v0.0.1，Phase 1（通用化地基）进行中。**
 > 本仓库是作者私有教学系统的开源精简版，正在按 [docs/ROADMAP.md](docs/ROADMAP.md) 逐步搬运通用能力。
 > 功能会**长期落后于**内部版本，这是预期状态，不是缺陷；接口也会随搬运调整。
 
@@ -10,13 +10,17 @@
 
 ## 现在能做什么
 
-骨架阶段（Phase 0）只包含工程约定，还没有教学功能：
+Phase 1 的通用化地基已经能跑通一条最小闭环——**建库 → 导入成绩 → 生成报告**，全部使用虚构演示数据：
 
+- **最小闭环**：`init_db.py --demo` → `import_scores.py` → `make_report.py`，产出 `outputs/phase1_report.md`（含学期、教学周、教学阶段与考试统计）。
 - **配置外置**：学段、学科、学期、课表、班级、数据库路径都由 `config.toml` 决定，见下方「配置」。
 - **文案外置**：学科名、学段名、阶段名、常用术语与演示提示语都放在 `labels/zh-CN.toml`，代码里只出现 key，见下方「文案」。
 - **虚构演示数据生成器**：`seed_demo_data.py` 生成完全虚构的班级、学生、成绩与作业记录。
 - **隐私扫描**：`scripts/privacy_scan.sh` 在提交前拦住真实数据、绝对路径与凭据痕迹。
 - **持续集成**：GitHub Actions 跑测试、演示数据自检与隐私扫描。
+
+> 提醒：最小闭环用的数据库 schema 是**临时**的（`meta.schema_version = 'phase1-temp'`），
+> Phase 2 会用正式的模块化 schema 替换或扩展，表名与字段不承诺兼容。
 
 ## 学会的边界（重要）
 
@@ -32,13 +36,19 @@
 git clone https://github.com/kkxh/physics-teaching-hub.git
 cd physics-teaching-hub
 
+# 三条命令跑通最小闭环（虚构演示数据；没复制配置也能跑，会用 config.example.toml）
+python3 init_db.py --demo                    # 建库 + 灌入虚构名单
+python3 import_scores.py                     # 导入演示成绩
+python3 make_report.py                       # 生成报告：outputs/phase1_report.md
+
+# 自检
 python3 -m unittest discover -s tests -t .   # 跑测试
 python3 seed_demo_data.py                    # 生成虚构演示数据（没 config.toml 时用示例配置）
 python3 seed_demo_data.py --check            # 演示数据自检
 bash scripts/privacy_scan.sh                 # 隐私扫描
 ```
 
-需要 Python 3.11 或更高版本（配置解析使用标准库 `tomllib`）。
+需要 Python 3.11 或更高版本（配置解析使用标准库 `tomllib`）；最小闭环只用标准库，不需要安装依赖。
 
 ## 配置
 
