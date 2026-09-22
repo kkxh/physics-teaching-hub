@@ -73,6 +73,20 @@ bash scripts/privacy_scan.sh                 # 隐私扫描
 - 上课日由 `schedule.weekdays` 决定（1=周一 … 7=周日）；「今天」按 `project.timezone` 计算，不依赖机器本地时区。
 - Phase 1 不处理节假日与调休。
 
+### 教学阶段
+
+- 不配置阶段时，按**学段 profile** 的默认阶段把学期切开：初中是「新授课 → 单元复习 → 中考复习」，高中是「新授课 → 一轮复习 → 二轮专题 → 考前冲刺」，最后一个阶段吸收余下的尾周。
+- 想按自己的复习节奏来，就用 `[[phases]]` 整体覆盖默认值：
+
+```toml
+[[phases]]
+name = "新授课"
+starts_on = "2026-09-01"
+ends_on = "2026-11-06"
+```
+
+- 约束：阶段按时间顺序排列、首尾相接、不重叠不留缺口，并完整覆盖学期；阶段名不能为空或重复。违反会直接报错，错误信息会点出是哪两个阶段冲突。
+
 ## 长期路线
 
 见 [docs/ROADMAP.md](docs/ROADMAP.md)。搬运进度记录在 [docs/MIGRATION_LEDGER.md](docs/MIGRATION_LEDGER.md)。

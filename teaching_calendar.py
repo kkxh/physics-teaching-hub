@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from config_loader import AppConfig, ScheduleConfig, SemesterConfig
+from stage_profiles import Phase
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class TeachingCalendar:
     semester: SemesterConfig
     schedule: ScheduleConfig
     timezone: str
+    phases: tuple[Phase, ...] = ()
 
     @classmethod
     def from_config(cls, config: AppConfig) -> "TeachingCalendar":
@@ -32,6 +34,7 @@ class TeachingCalendar:
             semester=config.semester,
             schedule=config.schedule,
             timezone=config.project.timezone,
+            phases=config.phases,
         )
 
     @property
@@ -55,6 +58,19 @@ class TeachingCalendar:
         if week is None or week < 1:
             return False
         return day.isoweekday() in self.schedule.weekdays
+
+    def current_phase(self, day: date) -> Phase | None:
+        """这一天属于哪个教学阶段；不在学期内返回 None。
+
+        阶段首尾相接并完整覆盖学期（见 config_loader 的校验），
+        所以学期内的每一天最多命中一个阶段。
+        """
+        if not self.is_in_semester(day):
+            return None
+        for phase in self.phases:
+            if phase.contains(day):
+                return phase
+        return None
 
     def weeks_total(self) -> int:
         """学期覆盖到第几教学周（含不足一周的尾周）。"""

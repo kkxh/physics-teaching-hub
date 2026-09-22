@@ -1,6 +1,6 @@
 # Phase 1 小步清单：通用化地基
 
-> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21）。每完成一步，就把对应小节标题里的状态补上并写日期。
+> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21），P1.3 已完成（2026-09-22）。每完成一步，就把对应小节标题里的状态补上并写日期。
 > 范围锚点：[ROADMAP.md](ROADMAP.md) 的 Phase 1。本文件只细化步骤，不扩大范围。
 
 ## 执行约定
@@ -46,7 +46,7 @@
 
 改动文件：`config_loader.py`、`teaching_calendar.py`（新增）、`data/README.md`（新增）、`config.example.toml`、`tests/test_config.py`、`tests/test_teaching_calendar.py`（新增）、`README.md`。
 
-## P1.3 学段与教学阶段 profile（未开始）
+## P1.3 学段与教学阶段 profile（已完成 2026-09-22）
 
 目标：把「教学跑道」抽成可配置的阶段定义，学段决定默认 profile（新增 `stage_profiles.py`）；配置里的 `[[phases]]` 可整体覆盖默认。
 
@@ -57,7 +57,7 @@
 - 非法阶段定义（重叠、缺口、越界、空名）报 `ConfigError`，错误信息点出冲突的两个阶段。
 - 两个学段的默认阶段明显不同，且差异来自 profile 而不是散落代码。
 
-改动文件：`stage_profiles.py`（新增）、`config_loader.py`、`config.example.toml`、`tests/test_stage_profiles.py`（新增）、`README.md`。
+改动文件：`stage_profiles.py`（新增）、`config_loader.py`、`teaching_calendar.py`、`config.example.toml`、`tests/test_stage_profiles.py`（新增）、`README.md`。
 
 ## P1.4 学科与学段文案收口（未开始）
 

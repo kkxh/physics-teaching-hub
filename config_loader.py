@@ -13,17 +13,12 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-VALID_STAGES: tuple[str, ...] = ("high_school", "middle_school")
-
-STAGE_LABELS: dict[str, str] = {
-    "high_school": "高中",
-    "middle_school": "初中",
-}
+from stage_profiles import STAGE_LABELS, VALID_STAGES, Phase, default_phases
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
 EXAMPLE_CONFIG_PATH = Path("config.example.toml")
@@ -77,6 +72,8 @@ class AppConfig:
     class_names: tuple[str, ...]
     # 相对路径的解析基准：load_config 传配置文件所在目录，直接调用 parse_config 时为当前工作目录。
     base_dir: Path = Path(".")
+    # 教学阶段：配置里写了 [[phases]] 就用配置的，否则用学段 profile 的默认阶段。
+    phases: tuple[Phase, ...] = ()
 
     @property
     def is_high_school(self) -> bool:
@@ -169,6 +166,7 @@ def parse_config(
 
     semester = _parse_semester(semester_raw)
     schedule = _parse_schedule(schedule_raw, semester)
+    phases = _parse_phases(raw.get("phases"), semester, project.stage)
 
     return AppConfig(
         project=project,
@@ -177,6 +175,7 @@ def parse_config(
         schedule=schedule,
         class_names=_parse_class_names(classes_raw.get("names")),
         base_dir=base,
+        phases=phases,
     )
 
 
@@ -345,3 +344,90 @@ def _parse_class_names(raw: Any) -> tuple[str, ...]:
     if len(set(names)) != len(names):
         raise ConfigError(f"配置项 classes.names 里有重复班名：{names}。")
     return tuple(names)
+
+
+def _parse_phases(raw: Any, semester: SemesterConfig, stage: str) -> tuple[Phase, ...]:
+    """解析 [[phases]]；不写或写空数组时用学段 profile 的默认阶段。"""
+    if raw is None or raw == []:
+        return default_phases(stage, semester.starts_on, semester.ends_on)
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
+        raise ConfigError(
+            "配置项 phases 应为 [[phases]] 表数组，每张表至少写 name、starts_on、ends_on。"
+        )
+
+    phases: list[Phase] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            raise ConfigError(f"配置项 phases[{index}] 应是一张 [[phases]] 表。")
+        name = str(item.get("name") or "").strip()
+        if not name:
+            raise ConfigError(
+                f"配置项 phases[{index}].name 不能为空；每个阶段都要有名字。"
+            )
+        phases.append(
+            Phase(
+                name=name,
+                starts_on=_parse_date(item.get("starts_on"), f"phases[{index}].starts_on"),
+                ends_on=_parse_date(item.get("ends_on"), f"phases[{index}].ends_on"),
+            )
+        )
+
+    _validate_phases(phases, semester)
+    return tuple(phases)
+
+
+def _validate_phases(phases: list[Phase], semester: SemesterConfig) -> None:
+    """阶段必须按时间排列、首尾相接、不重叠不留缺口，并完整覆盖学期。"""
+    seen: dict[str, int] = {}
+    for index, phase in enumerate(phases):
+        if phase.name in seen:
+            raise ConfigError(
+                f"配置项 phases[{index}].name 与 phases[{seen[phase.name]}].name 重名："
+                f"{phase.name!r}；阶段名必须唯一。"
+            )
+        seen[phase.name] = index
+        if phase.ends_on < phase.starts_on:
+            raise ConfigError(
+                f"配置项 phases[{index}]（{phase.name}）的 ends_on"
+                f"（{phase.ends_on.isoformat()}）早于 starts_on"
+                f"（{phase.starts_on.isoformat()}）。"
+            )
+        if phase.starts_on < semester.starts_on or phase.ends_on > semester.ends_on:
+            raise ConfigError(
+                f"配置项 phases[{index}]（{phase.name}）超出学期范围"
+                f"（{semester.starts_on.isoformat()} ~ {semester.ends_on.isoformat()}）。"
+            )
+
+    for index in range(1, len(phases)):
+        previous, current = phases[index - 1], phases[index]
+        if current.starts_on < previous.starts_on:
+            raise ConfigError(
+                f"配置项 phases 要按时间顺序排列：{current.name}"
+                f"（{current.starts_on.isoformat()}）排在了 {previous.name}"
+                f"（{previous.starts_on.isoformat()}）后面。"
+            )
+        if current.starts_on <= previous.ends_on:
+            raise ConfigError(
+                f"配置项 phases 有重叠：{previous.name} 到 "
+                f"{previous.ends_on.isoformat()}，{current.name} 从 "
+                f"{current.starts_on.isoformat()} 开始。"
+            )
+        if current.starts_on > previous.ends_on + timedelta(days=1):
+            raise ConfigError(
+                f"配置项 phases 之间有缺口：{previous.name} 结束于 "
+                f"{previous.ends_on.isoformat()}，{current.name} 从 "
+                f"{current.starts_on.isoformat()} 才开始。"
+            )
+
+    if phases[0].starts_on != semester.starts_on:
+        raise ConfigError(
+            f"配置项 phases 没有覆盖学期开头：第一个阶段 {phases[0].name} 从 "
+            f"{phases[0].starts_on.isoformat()} 开始，而学期在 "
+            f"{semester.starts_on.isoformat()} 就开始了。"
+        )
+    if phases[-1].ends_on != semester.ends_on:
+        raise ConfigError(
+            f"配置项 phases 没有覆盖学期结尾：最后一个阶段 {phases[-1].name} 结束于 "
+            f"{phases[-1].ends_on.isoformat()}，而学期到 "
+            f"{semester.ends_on.isoformat()} 才结束。"
+        )
