@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import labels as labels_module
+
 DATASET_VERSION = "demo.v1"
 DEMO_SEED = 20260921
 DEFAULT_OUTPUT = Path("demo/demo_dataset.json")
@@ -34,24 +36,37 @@ EXAMS = (
 )
 
 HOMEWORK_TOPICS = (
-    "演示作业：运动学图像",
-    "演示作业：牛顿第二定律",
-    "演示作业：机械能守恒",
-    "演示作业：电路分析",
+    "运动学图像",
+    "牛顿第二定律",
+    "机械能守恒",
+    "电路分析",
 )
 
 ERROR_TAGS = ("模型选择", "图像读取", "计算失误", "表达不规范", "概念混淆")
 
-FICTIONAL_NAME_PATTERN = re.compile(r"^学生\d{2}$")
+
+def fictional_name_pattern(prefix: str) -> re.Pattern[str]:
+    """虚构姓名模式：前缀 + 两位序号，例如 `学生01`。"""
+    return re.compile(rf"^{re.escape(prefix)}\d{{2}}$")
 
 
-def student_name(index: int) -> str:
-    """虚构姓名统一为「学生NN」，避免与任何真实姓名重合。"""
-    return f"学生{index:02d}"
+def student_name(index: int, prefix: str) -> str:
+    """虚构姓名统一为「前缀+两位序号」，避免与任何真实姓名重合。"""
+    return f"{prefix}{index:02d}"
 
 
-def build_dataset(seed: int = DEMO_SEED) -> dict[str, Any]:
-    """构建演示数据集；结构稳定，改动需升级 DATASET_VERSION。"""
+def build_dataset(
+    seed: int = DEMO_SEED,
+    labels: labels_module.Labels | None = None,
+) -> dict[str, Any]:
+    """构建演示数据集；结构稳定，改动需升级 DATASET_VERSION。
+
+    演示文案（提示语、姓名前缀、作业标题前缀）按 labels 取；省略时用仓库自带的文案表。
+    """
+    labels = labels or labels_module.load_labels()
+    name_prefix = labels.get("demo.student_name_prefix")
+    homework_prefix = labels.get("demo.homework_prefix")
+
     rng = random.Random(seed)
 
     classes: list[dict[str, Any]] = []
@@ -61,7 +76,7 @@ def build_dataset(seed: int = DEMO_SEED) -> dict[str, Any]:
         for position in range(1, STUDENTS_PER_CLASS + 1):
             student = {
                 "id": f"{class_name}-{position:02d}",
-                "name": student_name(position),
+                "name": student_name(position, name_prefix),
                 "seat_no": position,
             }
             students.append(student)
@@ -95,7 +110,7 @@ def build_dataset(seed: int = DEMO_SEED) -> dict[str, Any]:
             {
                 "date": f"2026-05-{11 + index:02d}",
                 "class": class_name,
-                "topic": topic,
+                "topic": f"{homework_prefix}：{topic}",
                 "records": records,
             }
         )
@@ -109,7 +124,7 @@ def build_dataset(seed: int = DEMO_SEED) -> dict[str, Any]:
     return {
         "version": DATASET_VERSION,
         "seed": seed,
-        "notice": "本数据集全部为虚构内容，用于演示与测试，不来自任何真实课堂。",
+        "notice": labels.get("demo.notice"),
         "classes": classes,
         "exams": exams,
         "homework": homework,
@@ -117,8 +132,13 @@ def build_dataset(seed: int = DEMO_SEED) -> dict[str, Any]:
     }
 
 
-def check_dataset(dataset: dict[str, Any]) -> list[str]:
+def check_dataset(
+    dataset: dict[str, Any],
+    labels: labels_module.Labels | None = None,
+) -> list[str]:
     """返回问题列表；空列表表示通过自检。"""
+    labels = labels or labels_module.load_labels()
+    pattern = fictional_name_pattern(labels.get("demo.student_name_prefix"))
     problems: list[str] = []
 
     if dataset.get("version") != DATASET_VERSION:
@@ -135,14 +155,14 @@ def check_dataset(dataset: dict[str, Any]) -> list[str]:
             problems.append(f"{klass.get('name')} 的学生数应为 {STUDENTS_PER_CLASS}")
         for student in students:
             student_ids.append(student["id"])
-            if not FICTIONAL_NAME_PATTERN.match(student["name"]):
+            if not pattern.match(student["name"]):
                 problems.append(f"发现非虚构姓名：{student['name']}")
 
     for exam in dataset.get("exams") or []:
         if len(exam.get("scores") or []) != len(student_ids):
             problems.append(f"{exam.get('key')} 的成绩条数与总人数不一致")
 
-    if build_dataset(dataset.get("seed", DEMO_SEED)) != dataset:
+    if build_dataset(dataset.get("seed", DEMO_SEED), labels=labels) != dataset:
         problems.append("数据集不可复现：同一 seed 生成了不同结果")
 
     return problems
@@ -155,8 +175,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="只自检，不落盘")
     args = parser.parse_args(argv)
 
-    dataset = build_dataset(args.seed)
-    problems = check_dataset(dataset)
+    labels = labels_module.load_labels()
+    dataset = build_dataset(args.seed, labels=labels)
+    problems = check_dataset(dataset, labels=labels)
     if problems:
         for problem in problems:
             print(f"[自检失败] {problem}", file=sys.stderr)

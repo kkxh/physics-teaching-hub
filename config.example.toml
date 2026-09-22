@@ -17,6 +17,11 @@ subject = "physics"
 # IANA 时区名；教学日与教学周都按这个时区计算。
 timezone = "Asia/Shanghai"
 
+# 文案表：locale 决定取 labels/<locale>.toml（仓库自带 zh-CN）。
+# labels_dir 省略时用仓库自带的 labels/ 目录；写了就按本配置文件所在目录解析。
+locale = "zh-CN"
+# labels_dir = "labels"
+
 [paths]
 # 数据库与输出目录都在使用者的本地环境里，不入 Git。
 # 相对路径以「本配置文件所在目录」为基准解析，与当前工作目录无关；~ 会展开为家目录。

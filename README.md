@@ -13,6 +13,7 @@
 骨架阶段（Phase 0）只包含工程约定，还没有教学功能：
 
 - **配置外置**：学段、学科、学期、课表、班级、数据库路径都由 `config.toml` 决定，见下方「配置」。
+- **文案外置**：学科名、学段名、阶段名、常用术语与演示提示语都放在 `labels/zh-CN.toml`，代码里只出现 key，见下方「文案」。
 - **虚构演示数据生成器**：`seed_demo_data.py` 生成完全虚构的班级、学生、成绩与作业记录。
 - **隐私扫描**：`scripts/privacy_scan.sh` 在提交前拦住真实数据、绝对路径与凭据痕迹。
 - **持续集成**：GitHub Actions 跑测试、演示数据自检与隐私扫描。
@@ -47,6 +48,7 @@ bash scripts/privacy_scan.sh                 # 隐私扫描
 | 配置项 | 含义 | 可覆盖的环境变量 |
 | --- | --- | --- |
 | `project.name` | 项目名，进报告文案 | — |
+| `project.locale` | 文案表语言，取 `labels/<locale>.toml` | — |
 | `project.stage` | 学段：`high_school`（高中） / `middle_school`（初中） | `PHYSICS_TEACHING_STAGE` |
 | `project.subject` | 学科标识，默认 `physics` | — |
 | `project.timezone` | IANA 时区，如 `Asia/Shanghai`；教学日与教学周按此时区计算 | `PHYSICS_TEACHING_TIMEZONE` |
@@ -86,6 +88,12 @@ ends_on = "2026-11-06"
 ```
 
 - 约束：阶段按时间顺序排列、首尾相接、不重叠不留缺口，并完整覆盖学期；阶段名不能为空或重复。违反会直接报错，错误信息会点出是哪两个阶段冲突。
+
+### 文案
+
+- 面向使用者的文字集中在 [labels/zh-CN.toml](labels/zh-CN.toml)：学科名、学段名、阶段名、学期/教学周/作业/订正/错因等术语，以及演示数据的提示语。代码里只出现 key（如 `phases.new_lesson`）。
+- `[project] locale` 决定取哪一份文案表；想换成自己的说法，复制一份改名（例如 `my-zh.toml`），再用 `[project] labels_dir` 指向它所在的目录（相对路径按配置文件所在目录解析）。
+- 缺 key、locale 文件不存在、文案不是字符串或写成空串，都会直接报错，错误信息带上文件路径与 key 名——不会静默显示空白。
 
 ## 长期路线
 

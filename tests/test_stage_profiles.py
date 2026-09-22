@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config_loader  # noqa: E402
+import labels as labels_module  # noqa: E402
 import stage_profiles  # noqa: E402
 import teaching_calendar  # noqa: E402
 
@@ -42,23 +43,27 @@ def short_semester_config(phases: Any = None) -> config_loader.AppConfig:
 
 class ProfileDataTests(unittest.TestCase):
     def test_every_valid_stage_has_a_profile_with_a_label(self):
+        labels = labels_module.load_labels()
+
         for stage in config_loader.VALID_STAGES:
             with self.subTest(stage=stage):
                 profile = stage_profiles.get_profile(stage)
 
                 self.assertEqual(profile.stage, stage)
-                self.assertEqual(profile.label, stage_profiles.STAGE_LABELS[stage])
-                self.assertTrue(profile.label.strip())
+                self.assertEqual(profile.label_key, f"stages.{stage}")
+                self.assertTrue(labels.get(profile.label_key).strip())
 
     def test_phase_templates_are_usable(self):
+        labels = labels_module.load_labels()
+
         for stage in config_loader.VALID_STAGES:
             with self.subTest(stage=stage):
                 templates = stage_profiles.get_profile(stage).phase_templates
 
                 self.assertGreaterEqual(len(templates), 2)
-                names = [template.name for template in templates]
-                self.assertTrue(all(name.strip() for name in names))
-                self.assertEqual(len(set(names)), len(names))
+                name_keys = [template.name_key for template in templates]
+                self.assertTrue(all(labels.get(key).strip() for key in name_keys))
+                self.assertEqual(len(set(name_keys)), len(name_keys))
                 # 只有最后一段允许是「一直到学期结束」。
                 for template in templates[:-1]:
                     self.assertIsInstance(template.weeks, int)

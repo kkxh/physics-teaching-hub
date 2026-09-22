@@ -10,19 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import labels as labels_module  # noqa: E402
 import seed_demo_data  # noqa: E402
 
 
 class DemoDataTests(unittest.TestCase):
     def test_demo_dataset_is_fictional_and_self_consistent(self):
         dataset = seed_demo_data.build_dataset()
+        pattern = seed_demo_data.fictional_name_pattern(
+            labels_module.load_labels().get("demo.student_name_prefix")
+        )
 
         self.assertEqual(seed_demo_data.check_dataset(dataset), [])
         students = [s for k in dataset["classes"] for s in k["students"]]
         self.assertEqual(len(students), len(seed_demo_data.CLASS_NAMES) * seed_demo_data.STUDENTS_PER_CLASS)
         for student in students:
             self.assertTrue(
-                seed_demo_data.FICTIONAL_NAME_PATTERN.match(student["name"]),
+                pattern.match(student["name"]),
                 msg=f"演示数据里出现了非虚构姓名：{student['name']}",
             )
 

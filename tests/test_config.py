@@ -21,7 +21,7 @@ SEMESTER = {"starts_on": "2026-09-01", "ends_on": "2027-01-22"}
 
 # config.example.toml 与 README「配置」小节必须同时覆盖的字段。
 DOCUMENTED_FIELDS: dict[str, tuple[str, ...]] = {
-    "project": ("name", "stage", "subject", "timezone"),
+    "project": ("name", "stage", "subject", "timezone", "locale"),
     "paths": ("database", "output_dir"),
     "semester": ("name", "starts_on", "ends_on"),
     "classes": ("names",),
@@ -72,6 +72,9 @@ class ExampleConfigTests(unittest.TestCase):
         self.assertEqual(config.project.stage_label, "高中")
         self.assertTrue(config.is_high_school)
         self.assertEqual(config.project.timezone, "Asia/Shanghai")
+        self.assertEqual(config.project.locale, "zh-CN")
+        self.assertEqual(config.project.subject_label, "物理")
+        self.assertEqual(config.labels.locale, "zh-CN")
         self.assertEqual(len(config.class_names), 2)
         self.assertEqual(config.semester.starts_on, date(2026, 9, 1))
         self.assertLess(config.semester.starts_on, config.semester.ends_on)

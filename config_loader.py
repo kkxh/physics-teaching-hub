@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from stage_profiles import STAGE_LABELS, VALID_STAGES, Phase, default_phases
+from labels import DEFAULT_LOCALE, LabelError, Labels, load_labels
+from stage_profiles import VALID_STAGES, Phase, default_phases, get_profile
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
 EXAMPLE_CONFIG_PATH = Path("config.example.toml")
@@ -50,11 +51,10 @@ class ProjectConfig:
     stage: str
     subject: str
     timezone: str
-
-    @property
-    def stage_label(self) -> str:
-        """学段的中文名，供报告与界面文案使用。"""
-        return STAGE_LABELS[self.stage]
+    locale: str = DEFAULT_LOCALE
+    # 下面两个是显示名，解析时就按文案表取好：学段名走 profile 的 key，学科名走 subjects.<subject>。
+    stage_label: str = ""
+    subject_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -70,6 +70,7 @@ class AppConfig:
     semester: SemesterConfig
     schedule: ScheduleConfig
     class_names: tuple[str, ...]
+    labels: Labels
     # 相对路径的解析基准：load_config 传配置文件所在目录，直接调用 parse_config 时为当前工作目录。
     base_dir: Path = Path(".")
     # 教学阶段：配置里写了 [[phases]] 就用配置的，否则用学段 profile 的默认阶段。
@@ -152,11 +153,20 @@ def parse_config(
     semester_raw = raw.get("semester") or {}
     schedule_raw = raw.get("schedule") or {}
 
+    locale = str(project_raw.get("locale") or DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
+    labels = _load_labels(project_raw.get("labels_dir"), base, locale)
+
+    stage = _parse_stage(project_raw.get("stage"), labels)
+    subject = str(project_raw.get("subject") or DEFAULT_SUBJECT).strip() or DEFAULT_SUBJECT
+
     project = ProjectConfig(
-        name=str(project_raw.get("name") or "物理教学中枢"),
-        stage=_parse_stage(project_raw.get("stage")),
-        subject=str(project_raw.get("subject") or DEFAULT_SUBJECT),
+        name=str(project_raw.get("name") or "").strip() or labels.get("project.default_name"),
+        stage=stage,
+        subject=subject,
         timezone=_parse_timezone(project_raw.get("timezone")),
+        locale=locale,
+        stage_label=labels.get(get_profile(stage).label_key),
+        subject_label=labels.get(f"subjects.{subject}", fallback=subject),
     )
 
     paths = PathsConfig(
@@ -166,7 +176,7 @@ def parse_config(
 
     semester = _parse_semester(semester_raw)
     schedule = _parse_schedule(schedule_raw, semester)
-    phases = _parse_phases(raw.get("phases"), semester, project.stage)
+    phases = _parse_phases(raw.get("phases"), semester, stage, labels)
 
     return AppConfig(
         project=project,
@@ -174,6 +184,7 @@ def parse_config(
         semester=semester,
         schedule=schedule,
         class_names=_parse_class_names(classes_raw.get("names")),
+        labels=labels,
         base_dir=base,
         phases=phases,
     )
@@ -212,13 +223,28 @@ def _with_env_overrides(raw: Mapping[str, Any], env: Mapping[str, str]) -> dict[
     return merged
 
 
-def _parse_stage(raw: Any) -> str:
+def _parse_stage(raw: Any, labels: Labels) -> str:
     stage = str(raw or DEFAULT_STAGE).strip()
     if stage not in VALID_STAGES:
+        options = []
+        for name in VALID_STAGES:
+            options.append(f"{name}（{labels.get(f'stages.{name}', fallback=name)}）")
         raise ConfigError(
-            f"配置项 project.stage 取值不对：{stage!r}；可选值为 {'、'.join(VALID_STAGES)}。"
+            f"配置项 project.stage 取值不对：{stage!r}；可选值为 {'、'.join(options)}。"
         )
     return stage
+
+
+def _load_labels(raw_dir: Any, base_dir: Path, locale: str) -> Labels:
+    """加载文案表：labels_dir 没写就用仓库自带的那一份，写了就按配置目录解析。"""
+    if str(raw_dir or "").strip():
+        directory: Path | None = _resolve_path(raw_dir, base_dir)
+    else:
+        directory = None
+    try:
+        return load_labels(locale=locale, labels_dir=directory)
+    except LabelError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def _parse_timezone(raw: Any) -> str:
@@ -346,10 +372,18 @@ def _parse_class_names(raw: Any) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _parse_phases(raw: Any, semester: SemesterConfig, stage: str) -> tuple[Phase, ...]:
+def _parse_phases(
+    raw: Any,
+    semester: SemesterConfig,
+    stage: str,
+    labels: Labels,
+) -> tuple[Phase, ...]:
     """解析 [[phases]]；不写或写空数组时用学段 profile 的默认阶段。"""
     if raw is None or raw == []:
-        return default_phases(stage, semester.starts_on, semester.ends_on)
+        try:
+            return default_phases(stage, semester.starts_on, semester.ends_on, labels=labels)
+        except LabelError as exc:
+            raise ConfigError(str(exc)) from exc
     if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
         raise ConfigError(
             "配置项 phases 应为 [[phases]] 表数组，每张表至少写 name、starts_on、ends_on。"

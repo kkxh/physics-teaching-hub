@@ -1,6 +1,6 @@
 # Phase 1 小步清单：通用化地基
 
-> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21），P1.3 已完成（2026-09-22）。每完成一步，就把对应小节标题里的状态补上并写日期。
+> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21），P1.3、P1.4 已完成（2026-09-22）。每完成一步，就把对应小节标题里的状态补上并写日期。
 > 范围锚点：[ROADMAP.md](ROADMAP.md) 的 Phase 1。本文件只细化步骤，不扩大范围。
 
 ## 执行约定
@@ -59,7 +59,7 @@
 
 改动文件：`stage_profiles.py`（新增）、`config_loader.py`、`teaching_calendar.py`、`config.example.toml`、`tests/test_stage_profiles.py`（新增）、`README.md`。
 
-## P1.4 学科与学段文案收口（未开始）
+## P1.4 学科与学段文案收口（已完成 2026-09-22）
 
 目标：用户可见文案集中到 `labels/zh-CN.toml`，由 `labels.py` 读取；`config.toml` 的 `[project] locale` 决定取哪一份；清掉 `config_loader.STAGE_LABELS` 这类散落硬编码。
 
@@ -70,7 +70,7 @@
 - 用标准库 `tokenize` 扫描指定模块的字符串字面量，除 docstring 与错误信息白名单外不得出现「物理」「高中」「初中」。
 - 代码里不再直接引用 `STAGE_LABELS`。
 
-改动文件：`labels/zh-CN.toml`（新增）、`labels.py`（新增）、`config_loader.py`、`config.example.toml`、`seed_demo_data.py`、`tests/test_labels.py`（新增）。
+改动文件：`labels/zh-CN.toml`（新增）、`labels.py`（新增）、`config_loader.py`、`stage_profiles.py`、`config.example.toml`、`seed_demo_data.py`、`tests/test_labels.py`（新增）、`tests/test_stage_profiles.py`、`tests/test_smoke.py`、`tests/test_config.py`、`README.md`。
 
 ## P1.5 演示数据配置化（未开始）
 

@@ -1,0 +1,41 @@
+# 文案表：面向使用者的教学文案都放这里，代码里只出现 key。
+#
+# 只放「用户看得见的教学文字」：学科名、学段名、阶段名、常用术语、演示数据提示语。
+# CLI 日志与报错信息不进这张表。
+# 想换成自己的说法：复制一份（例如 my-zh.toml）改内容，再用 config.toml 的
+# [project] locale / labels_dir 指过去。
+#
+# 每一项都必须是字符串；嵌套表会拍平成 a.b.c 这样的 key。
+
+[project]
+default_name = "物理教学中枢"
+
+[subjects]
+physics = "物理"
+
+[stages]
+high_school = "高中"
+middle_school = "初中"
+
+# 阶段 key 与 stage_profiles.py 里的默认模板一一对应。
+[phases]
+new_lesson = "新授课"
+unit_review = "单元复习"
+first_review = "一轮复习"
+second_review = "二轮专题"
+final_sprint = "考前冲刺"
+exam_review = "中考复习"
+
+[terms]
+semester = "学期"
+teaching_week = "教学周"
+homework = "作业"
+correction = "订正"
+error_tag = "错因"
+student = "学生"
+class = "班级"
+
+[demo]
+notice = "本数据集全部为虚构内容，用于演示与测试，不来自任何真实课堂。"
+student_name_prefix = "学生"
+homework_prefix = "演示作业"
