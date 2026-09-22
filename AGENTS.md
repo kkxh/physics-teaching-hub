@@ -14,6 +14,7 @@
 1. `docs/ROADMAP.md` —— 长期路线与当前所处阶段
 2. `docs/MIGRATION_LEDGER.md` —— 搬运台账：哪些模块搬过、与上游的差异
 3. `docs/PRIVACY.md` —— 隐私与版权边界
+4. `docs/ENGINEERING_NOTES.md` —— 写代码时默认要遵守的工程约定（身份、时间、事务、隐私等）
 
 ## 3. 硬规则（不可绕过）
 
