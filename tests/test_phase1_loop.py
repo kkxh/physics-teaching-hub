@@ -166,20 +166,21 @@ class LoopTests(LoopTestCase):
         )
         self.assertEqual(second["exams"], len(self.config.demo.exams))
 
-    def test_schema_is_marked_temporary(self):
+    def test_schema_is_marked_phase2(self):
         self.run_loop()
 
-        self.assertEqual(self.meta("schema_version"), "phase1-temp")
+        self.assertEqual(self.meta("schema_version"), "phase2")
         self.assertEqual(self.meta("dataset_version"), seed_demo_data.DATASET_VERSION)
 
-        schema = (ROOT / "schema" / "phase1_schema.sql").read_text(encoding="utf-8")
-        self.assertIn("Phase 2", schema)
-        self.assertIn("不承诺兼容", schema)
-
+        # Phase 1 的临时 schema 声明留在历史文档与迁移说明里
         plan = (ROOT / "docs" / "PHASE1_PLAN.md").read_text(encoding="utf-8")
         roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
         self.assertIn("临时 schema", plan)
         self.assertIn("临时 schema", roadmap)
+        migrations_readme = (ROOT / "schema" / "migrations" / "README.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("幂等", migrations_readme)
 
     def test_import_scores_requires_the_database(self):
         result = self.run_script("import_scores.py")

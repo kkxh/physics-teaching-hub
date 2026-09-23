@@ -1,14 +1,15 @@
-"""建库 + 灌入虚构演示名单（Phase 1 最小闭环第一步）。
+"""建库 + 灌入虚构演示名单（Phase 2 起用正式 schema）。
 
 用法：
-    python3 init_db.py --demo                 # 用配置里的数据库路径建库
+    python3 init_db.py --demo                    # 用配置里的数据库路径建库
     python3 init_db.py --demo --config my.toml
+    python3 init_db.py --demo --rebuild --yes    # 删掉旧库重建（Phase 1 临时库必须这样处理）
 
 Phase 1 只支持虚构演示数据：名单里一旦出现不符合虚构模式的姓名，直接拒绝导入。
 建库是幂等的：重复执行不会产生重复行，也不会清掉已有数据。
 
-数据库 schema 是**临时的**（schema/phase1_schema.sql，meta.schema_version='phase1-temp'），
-Phase 2 会替换或扩展，表名与字段不承诺兼容。
+schema 由 schema/*.sql 按固定顺序建好（core → scores → homework → errors → profile → alerts），
+`meta.schema_version` 记为 `phase2`；此后的结构变更走 `schema/migrations/`。
 """
 
 from __future__ import annotations
@@ -22,13 +23,39 @@ from typing import Any, Mapping
 import config_loader
 import seed_demo_data
 
-SCHEMA_PATH = Path(__file__).resolve().parent / "schema" / "phase1_schema.sql"
-SCHEMA_VERSION = "phase1-temp"
-EXPECTED_TABLES = ("meta", "classes", "students", "exams", "exam_scores")
+SCHEMA_DIR = Path(__file__).resolve().parent / "schema"
+MIGRATIONS_DIR = SCHEMA_DIR / "migrations"
+
+# 建库顺序固定：后面的文件引用前面文件里的表（外键）。
+SCHEMA_FILES: tuple[str, ...] = (
+    "core.sql",
+    "scores.sql",
+    "homework.sql",
+    "errors.sql",
+    "profile.sql",
+    "alerts.sql",
+)
+
+# 每个文件必须建出的表：按完整清单校验，避免残缺 schema 被当成建好了。
+EXPECTED_TABLES_BY_FILE: Mapping[str, tuple[str, ...]] = {
+    "core.sql": ("meta", "schema_migrations", "classes", "students"),
+    "scores.sql": ("exams", "exam_scores", "exam_items", "item_scores"),
+    "homework.sql": ("homework_assignments", "homework_submissions", "corrections"),
+    "errors.sql": ("error_tags", "error_records", "behavior_records"),
+    "profile.sql": ("ability_scores",),
+    "alerts.sql": ("alerts", "follow_ups"),
+}
+
+SCHEMA_VERSION = "phase2"
+# Phase 1 的临时 schema：表名与字段不承诺兼容，改用正式 schema 时必须显式重建。
+PHASE1_SCHEMA_VERSION = "phase1-temp"
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
-    """打开数据库连接：行按名字取，并显式开启外键（SQLite 默认是关的）。"""
+    """打开数据库连接：行按名字取，并显式开启外键（SQLite 默认是关的）。
+
+    P2.0 的数据层会把它搬进 db.py；这里先保持为兼容入口。
+    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -42,16 +69,25 @@ def table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return row is not None
 
 
-def apply_schema(conn: sqlite3.Connection) -> None:
-    """建表并写入 schema 版本；按「完整表清单」校验，避免残缺 schema 被当成建好了。"""
-    conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+def schema_version(conn: sqlite3.Connection) -> str | None:
+    if not table_exists(conn, "meta"):
+        return None
+    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    return None if row is None else str(row["value"])
 
-    missing = [name for name in EXPECTED_TABLES if not table_exists(conn, name)]
-    if missing:
-        raise config_loader.ConfigError(
-            f"建库不完整，缺少这些表：{'、'.join(missing)}；"
-            f"请检查 {SCHEMA_PATH.name} 是否被改动过。"
-        )
+
+def apply_schema(conn: sqlite3.Connection) -> None:
+    """按固定顺序执行建表脚本，逐文件校验表是否建全，最后写入 schema 版本。"""
+    for name in SCHEMA_FILES:
+        path = SCHEMA_DIR / name
+        conn.executescript(path.read_text(encoding="utf-8"))
+        missing = [
+            table for table in EXPECTED_TABLES_BY_FILE[name] if not table_exists(conn, table)
+        ]
+        if missing:
+            raise config_loader.ConfigError(
+                f"{name} 没建全，缺少这些表：{'、'.join(missing)}；请检查 schema 文件是否被改动过。"
+            )
 
     with conn:
         conn.execute(
@@ -61,6 +97,33 @@ def apply_schema(conn: sqlite3.Connection) -> None:
             """,
             (SCHEMA_VERSION,),
         )
+
+
+def apply_migrations(conn: sqlite3.Connection) -> list[str]:
+    """执行 schema/migrations/ 里还没应用过的迁移，返回本次应用的迁移名。"""
+    applied = {
+        str(row["name"]) for row in conn.execute("SELECT name FROM schema_migrations")
+    }
+    done: list[str] = []
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if path.name in applied:
+            continue
+        conn.executescript(path.read_text(encoding="utf-8"))
+        with conn:
+            conn.execute("INSERT INTO schema_migrations (name) VALUES (?)", (path.name,))
+        done.append(path.name)
+    return done
+
+
+def remove_database(database: Path) -> list[Path]:
+    """删掉数据库文件及其 WAL/SHM 附属文件；返回实际删掉的路径。"""
+    removed: list[Path] = []
+    for suffix in ("", "-wal", "-shm"):
+        path = Path(f"{database}{suffix}")
+        if path.exists():
+            path.unlink()
+            removed.append(path)
+    return removed
 
 
 def import_roster(conn: sqlite3.Connection, dataset: Mapping[str, Any]) -> dict[str, int]:
@@ -119,10 +182,39 @@ def import_roster(conn: sqlite3.Connection, dataset: Mapping[str, Any]) -> dict[
     return {"classes": class_count, "students": student_count}
 
 
-def init_database(config: config_loader.AppConfig) -> dict[str, Any]:
+def init_database(
+    config: config_loader.AppConfig,
+    *,
+    rebuild: bool = False,
+    confirmed: bool = False,
+) -> dict[str, Any]:
     """建库 + 导入演示名单；返回一份摘要，供命令行打印与测试断言。"""
     database = config.paths.database
     database.parent.mkdir(parents=True, exist_ok=True)
+    removed: list[Path] = []
+
+    if database.exists():
+        conn = connect(database)
+        try:
+            existing = schema_version(conn)
+        finally:
+            conn.close()
+        if existing != SCHEMA_VERSION:
+            if not rebuild:
+                hint = (
+                    "Phase 1 的临时库不会自动迁移"
+                    if existing == PHASE1_SCHEMA_VERSION
+                    else "schema 版本对不上"
+                )
+                raise config_loader.ConfigError(
+                    f"{hint}：{database} 当前是 {existing or '未知版本'}，本版本要求 {SCHEMA_VERSION}；"
+                    "请加 --rebuild --yes 重建（会删掉这个库）。"
+                )
+            if not confirmed:
+                raise config_loader.ConfigError(
+                    f"--rebuild 会删除现有数据库：{database}；确认无误后请再加 --yes。"
+                )
+            removed = remove_database(database)
 
     dataset = seed_demo_data.load_or_create_dataset(config)
     seed_demo_data.validate_dataset_for_import(dataset, config)
@@ -130,6 +222,7 @@ def init_database(config: config_loader.AppConfig) -> dict[str, Any]:
     conn = connect(database)
     try:
         apply_schema(conn)
+        applied_migrations = apply_migrations(conn)
         counts = import_roster(conn, dataset)
     finally:
         conn.close()
@@ -140,23 +233,31 @@ def init_database(config: config_loader.AppConfig) -> dict[str, Any]:
         "classes": counts["classes"],
         "students": counts["students"],
         "dataset": config.demo.output,
+        "migrations": applied_migrations,
+        "removed": removed,
     }
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="建库并灌入虚构演示名单（Phase 1）")
+    parser = argparse.ArgumentParser(description="建库并灌入虚构演示名单（Phase 2）")
     parser.add_argument("--config", default=None, help="配置文件；省略时自动找")
     parser.add_argument(
         "--demo",
         action="store_true",
-        help="导入虚构演示名单（Phase 1 只支持这一种）",
+        help="导入虚构演示名单（Phase 1 起只支持这一种）",
     )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="删掉旧库重建（schema 版本不一致时必须显式指定，且要配合 --yes）",
+    )
+    parser.add_argument("--yes", action="store_true", help="确认执行 --rebuild 的删除动作")
     args = parser.parse_args(argv)
 
     if not args.demo:
         print(
-            "[提示] Phase 1 只支持 --demo：请用 python3 init_db.py --demo 建演示库；"
-            "真实成绩导入在 Phase 2。",
+            "[提示] 只支持 --demo：请用 python3 init_db.py --demo 建演示库；"
+            "真实成绩导入在 Phase 2 的 import-scores。",
             file=sys.stderr,
         )
         return 2
@@ -165,12 +266,16 @@ def main(argv: list[str] | None = None) -> int:
         config = config_loader.load_config(
             config_loader.resolve_cli_config_path(args.config), env=None
         )
-        summary = init_database(config)
+        summary = init_database(config, rebuild=args.rebuild, confirmed=args.yes)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
 
+    for path in summary["removed"]:
+        print(f"已删除旧库文件：{path}")
     print(f"已建库：{summary['database']}（schema: {summary['schema_version']}）")
+    if summary["migrations"]:
+        print(f"已应用迁移：{'、'.join(summary['migrations'])}")
     print(
         f"已导入演示名单：{summary['classes']} 个虚构班级 / "
         f"{summary['students']} 名学生（数据集：{summary['dataset']}）"
