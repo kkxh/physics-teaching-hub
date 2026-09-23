@@ -174,5 +174,31 @@ class TrackedFileTests(unittest.TestCase):
         self.assertFalse([name for name in entries if name.startswith("outputs/")])
 
 
+class WorkflowTests(unittest.TestCase):
+    """守住 CI 的两条底线：最小权限 + 不退回被弃用的 action 主版本。"""
+
+    def setUp(self):
+        self.text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    def test_workflow_requests_read_only_permissions(self):
+        self.assertIn("permissions:", self.text)
+        self.assertIn("contents: read", self.text)
+
+    def test_workflow_uses_current_action_majors(self):
+        for action in ("actions/checkout@v7", "actions/setup-python@v7"):
+            with self.subTest(action=action):
+                self.assertIn(action, self.text, msg=f"{action} 该升级了")
+        for stale in ("actions/checkout@v4", "actions/setup-python@v5"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, self.text)
+
+    def test_workflow_covers_minimum_and_latest_python(self):
+        self.assertIn('python-version: ["3.11", "3.14"]', self.text)
+
+    def test_workflow_runs_both_privacy_scan_modes(self):
+        self.assertIn("bash scripts/privacy_scan.sh", self.text)
+        self.assertIn("bash scripts/privacy_scan.sh --all", self.text)
+
+
 if __name__ == "__main__":
     unittest.main()

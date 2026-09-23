@@ -6,18 +6,32 @@ on:
       - main
   pull_request:
 
+# 最小权限：CI 只需要读代码。
+permissions:
+  contents: read
+
+# 同一分支连推多次时，取消上一次还没跑完的 CI。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 支持的最低版本（tomllib 需要 3.11）+ 当前最新稳定版
+        python-version: ["3.11", "3.14"]
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
@@ -33,5 +47,8 @@ jobs:
       - name: Demo data self-check
         run: python seed_demo_data.py --check
 
-      - name: Privacy scan
+      - name: Privacy scan (tracked files)
         run: bash scripts/privacy_scan.sh
+
+      - name: Privacy scan (worktree)
+        run: bash scripts/privacy_scan.sh --all
