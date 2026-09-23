@@ -28,9 +28,6 @@ DEFAULT_COLUMNS: Mapping[str, str] = {
     "name": "name",
     "score": "score",
 }
-REQUIRED_FIELDS = ("score",)
-
-
 @dataclass(frozen=True)
 class ScoreRow:
     """CSV 里的一行原始成绩。"""
@@ -209,8 +206,8 @@ def parse_columns(spec: str | None) -> dict[str, str]:
     return columns
 
 
-def parse_score(raw: str, row_number: int) -> float:
-    text = (raw or "").strip()
+def parse_score(raw: Any, row_number: int) -> float:
+    text = "" if raw is None else str(raw).strip()
     if not text:
         raise config_loader.ConfigError(f"第 {row_number} 行没有分数，拒绝导入。")
     try:
@@ -224,6 +221,65 @@ def parse_score(raw: str, row_number: int) -> float:
     return score
 
 
+def _check_columns(
+    headers: Sequence[str],
+    columns: Mapping[str, str],
+    source: str,
+) -> dict[str, str]:
+    """确认表头里有分数列，以及 student_uid / name 至少一列；返回实际存在的列。"""
+    present = {field: header for field, header in columns.items() if header in headers}
+    shown = "、".join(headers) or "（空）"
+
+    if "score" not in present:
+        raise config_loader.ConfigError(
+            f"{source} 缺少分数列：{columns['score']!r}；"
+            f"实际表头是：{shown}。可用 --columns 映射表头。"
+        )
+    if "student_uid" not in present and "name" not in present:
+        raise config_loader.ConfigError(
+            f"{source} 里找不到学生标识列：至少要有一列 "
+            f"{columns['student_uid']!r}（学号）或 {columns['name']!r}（姓名）；"
+            f"实际表头是：{shown}。可用 --columns 映射表头。"
+        )
+    return present
+
+
+def parse_rows(
+    headers: Sequence[str],
+    records: Sequence[tuple[int, Mapping[str, Any]]],
+    *,
+    source: str,
+    columns: Mapping[str, str],
+) -> list[ScoreRow]:
+    """把「表头 + 逐行取值」解析成 ScoreRow；CSV 与 Excel 共用这一套。"""
+    present = _check_columns(headers, columns, source)
+
+    def cell(raw: Mapping[str, Any], field: str) -> str | None:
+        header = present.get(field)
+        if header is None:
+            return None
+        value = raw.get(header)
+        if value is None:
+            return None
+        return str(value).strip() or None
+
+    rows: list[ScoreRow] = []
+    for row_number, raw in records:
+        score = parse_score(raw.get(present["score"]), row_number)
+        rows.append(
+            ScoreRow(
+                row_number=row_number,
+                student_uid=cell(raw, "student_uid"),
+                name=cell(raw, "name"),
+                score=score,
+            )
+        )
+
+    if not rows:
+        raise config_loader.ConfigError(f"{source} 里没有任何成绩行。")
+    return rows
+
+
 def read_score_rows(csv_path: Path, columns: Mapping[str, str]) -> list[ScoreRow]:
     """读 CSV：必须有分数列，以及 student_uid / name 里至少一列。"""
     if not csv_path.is_file():
@@ -232,44 +288,60 @@ def read_score_rows(csv_path: Path, columns: Mapping[str, str]) -> list[ScoreRow
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         headers = reader.fieldnames or []
-        present = {
-            field: header for field, header in columns.items() if header in headers
-        }
-        shown = "、".join(headers) or "（空）"
+        records = [(number, dict(raw)) for number, raw in enumerate(reader, start=2)]
 
-        if "score" not in present:
-            raise config_loader.ConfigError(
-                f"{csv_path.name} 缺少分数列：{columns['score']!r}；"
-                f"实际表头是：{shown}。可用 --columns 映射表头。"
-            )
-        if "student_uid" not in present and "name" not in present:
-            raise config_loader.ConfigError(
-                f"{csv_path.name} 里找不到学生标识列：至少要有一列 "
-                f"{columns['student_uid']!r}（学号）或 {columns['name']!r}（姓名）；"
-                f"实际表头是：{shown}。可用 --columns 映射表头。"
-            )
+    return parse_rows(headers, records, source=csv_path.name, columns=columns)
 
-        rows: list[ScoreRow] = []
-        for row_number, raw in enumerate(reader, start=2):
-            score = parse_score(raw.get(present["score"], ""), row_number)
 
-            def cell(field: str) -> str | None:
-                header = present.get(field)
-                if header is None:
-                    return None
-                return (raw.get(header) or "").strip() or None
+def load_openpyxl():
+    """按需导入 openpyxl；没装就给出可操作的安装提示。"""
+    try:
+        import openpyxl
+    except ImportError as exc:
+        raise config_loader.ConfigError(
+            "读取 Excel 需要 openpyxl：请先运行 python3 -m pip install -r requirements.txt"
+        ) from exc
+    return openpyxl
 
-            rows.append(
-                ScoreRow(
-                    row_number=row_number,
-                    student_uid=cell("student_uid"),
-                    name=cell("name"),
-                    score=score,
+
+def read_score_rows_from_excel(
+    xlsx_path: Path,
+    columns: Mapping[str, str],
+    sheet: str | None = None,
+) -> list[ScoreRow]:
+    """读 Excel（.xlsx）：默认第一个工作表，可用 sheet 指定。"""
+    if not xlsx_path.is_file():
+        raise config_loader.ConfigError(f"找不到成绩表：{xlsx_path}")
+
+    openpyxl = load_openpyxl()
+    workbook = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+    try:
+        if sheet:
+            if sheet not in workbook.sheetnames:
+                raise config_loader.ConfigError(
+                    f"{xlsx_path.name} 里没有工作表 {sheet!r}；"
+                    f"现有工作表：{'、'.join(workbook.sheetnames)}"
                 )
-            )
-    if not rows:
-        raise config_loader.ConfigError(f"{csv_path.name} 里没有任何成绩行。")
-    return rows
+            worksheet = workbook[sheet]
+        else:
+            worksheet = workbook.worksheets[0]
+
+        rows = worksheet.iter_rows(values_only=True)
+        first = next(rows, None)
+        if first is None:
+            raise config_loader.ConfigError(f"{xlsx_path.name} 的工作表是空的。")
+        headers = ["" if cell is None else str(cell).strip() for cell in first]
+
+        records: list[tuple[int, Mapping[str, Any]]] = []
+        for row_number, values in enumerate(rows, start=2):
+            if all(value is None or str(value).strip() == "" for value in values):
+                continue
+            records.append((row_number, dict(zip(headers, values))))
+
+        source = f"{xlsx_path.name}[{worksheet.title}]"
+        return parse_rows(headers, records, source=source, columns=columns)
+    finally:
+        workbook.close()
 
 
 def build_import_plan(
@@ -363,7 +435,53 @@ def import_scores_from_csv(
     dry_run: bool = False,
     columns_spec: str | None = None,
 ) -> dict[str, Any]:
-    """从 CSV 导入成绩；dry_run=True 只返回计划，不写库。
+    """从 CSV 导入成绩。"""
+    columns = parse_columns(columns_spec)
+    rows = read_score_rows(Path(csv_path), columns)
+    return import_score_rows(
+        config,
+        rows=rows,
+        exam_name=exam_name,
+        exam_date=exam_date,
+        full_score=full_score,
+        dry_run=dry_run,
+    )
+
+
+def import_scores_from_excel(
+    config: config_loader.AppConfig,
+    *,
+    xlsx_path: str | Path,
+    exam_name: str,
+    exam_date: str,
+    full_score: float = 100.0,
+    dry_run: bool = False,
+    columns_spec: str | None = None,
+    sheet: str | None = None,
+) -> dict[str, Any]:
+    """从 Excel（.xlsx）导入成绩。"""
+    columns = parse_columns(columns_spec)
+    rows = read_score_rows_from_excel(Path(xlsx_path), columns, sheet=sheet)
+    return import_score_rows(
+        config,
+        rows=rows,
+        exam_name=exam_name,
+        exam_date=exam_date,
+        full_score=full_score,
+        dry_run=dry_run,
+    )
+
+
+def import_score_rows(
+    config: config_loader.AppConfig,
+    *,
+    rows: Sequence[ScoreRow],
+    exam_name: str,
+    exam_date: str,
+    full_score: float = 100.0,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """把已经解析好的成绩行导入库；dry_run=True 只返回计划，不写库。
 
     返回 {"dry_run": bool, "plan": ImportPlan, ...}；真正写入时还会带上
     {"exams_created": int, "scores_written": int}。
@@ -372,9 +490,6 @@ def import_scores_from_csv(
         raise config_loader.ConfigError(
             f"还没有数据库：{config.paths.database}；请先运行 python3 hub.py init-db --demo。"
         )
-
-    columns = parse_columns(columns_spec)
-    rows = read_score_rows(Path(csv_path), columns)
 
     conn = db_module.connect(config.paths.database)
     try:

@@ -64,6 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--demo", action="store_true", help="导入配置里 [demo] 生成的虚构数据集"
     )
     scores_parser.add_argument("--csv", default=None, help="成绩表（CSV，UTF-8，带表头）")
+    scores_parser.add_argument("--excel", default=None, help="成绩表（Excel .xlsx，带表头）")
+    scores_parser.add_argument("--sheet", default=None, help="Excel 工作表名，默认第一个")
     scores_parser.add_argument("--exam", default=None, help="考试名（与日期一起定位考试）")
     scores_parser.add_argument("--exam-date", default=None, help="考试日期，YYYY-MM-DD")
     scores_parser.add_argument(
@@ -120,23 +122,39 @@ def run_init_db(config: config_loader.AppConfig, args: argparse.Namespace) -> in
 
 
 def run_import_scores(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
-    if args.csv:
+    if args.csv and args.excel:
+        print("[提示] --csv 与 --excel 只能给一个。", file=sys.stderr)
+        return 2
+
+    if args.csv or args.excel:
         if not args.exam or not args.exam_date:
             print(
-                "[提示] 用 --csv 导入时必须同时给 --exam 与 --exam-date："
+                "[提示] 导入成绩表时必须同时给 --exam 与 --exam-date："
                 "考试按「名称 + 日期」匹配，日期不同就是另一场考试。",
                 file=sys.stderr,
             )
             return 2
-        result = importer.import_scores_from_csv(
-            config,
-            csv_path=args.csv,
-            exam_name=args.exam,
-            exam_date=args.exam_date,
-            full_score=args.full_score,
-            dry_run=args.dry_run,
-            columns_spec=args.columns,
-        )
+        if args.csv:
+            result = importer.import_scores_from_csv(
+                config,
+                csv_path=args.csv,
+                exam_name=args.exam,
+                exam_date=args.exam_date,
+                full_score=args.full_score,
+                dry_run=args.dry_run,
+                columns_spec=args.columns,
+            )
+        else:
+            result = importer.import_scores_from_excel(
+                config,
+                xlsx_path=args.excel,
+                exam_name=args.exam,
+                exam_date=args.exam_date,
+                full_score=args.full_score,
+                dry_run=args.dry_run,
+                columns_spec=args.columns,
+                sheet=args.sheet,
+            )
         plan = result["plan"]
         for warning in plan.warnings:
             print(f"[提醒] {warning}")
@@ -159,7 +177,7 @@ def run_import_scores(config: config_loader.AppConfig, args: argparse.Namespace)
     if not args.demo:
         print(
             "[提示] 请明确指定数据来源：--demo 导入虚构演示数据；"
-            "真实成绩表用 --csv（P2.1 落地）。",
+            "真实成绩表用 --csv 或 --excel。",
             file=sys.stderr,
         )
         return 2

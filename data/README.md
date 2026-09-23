@@ -37,3 +37,16 @@ python3 hub.py import-scores --csv 成绩表.csv --exam 考试名 --exam-date 20
 - 同一场考试重复导入是幂等的（按「考试名 + 日期 + 学生」覆盖分数）；
   **日期不同就是另一场考试**——所以同一次考试的成绩导入与错题导入要用同一个 `--exam-date`。
 - 导入只写本机数据库（路径见 `config.toml` 的 `paths.database`），不联网、不导出。
+
+### Excel（.xlsx）
+
+```bash
+python3 -m pip install -r requirements.txt        # 需要 openpyxl
+python3 hub.py import-scores --excel 成绩表.xlsx --sheet 成绩 \
+    --exam 考试名 --exam-date 2026-11-05 \
+    --columns "学号=student_uid,姓名=name,分数=score"
+```
+
+- 列约定、分数校验、`--dry-run`、幂等规则与 CSV 完全一致；默认读**第一个工作表**，用 `--sheet` 指定别的。
+- 空白单元格视为「没有分数」，会被拒绝；Excel 末尾的整行空行会自动忽略。
+- 只读 `.xlsx`；老的 `.xls` 请先另存为 `.xlsx`。

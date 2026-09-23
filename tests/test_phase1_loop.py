@@ -231,13 +231,14 @@ class LoopTests(LoopTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("JSON", result.stderr)
 
-    def test_requirements_stay_stdlib_only(self):
+    def test_runtime_dependencies_are_intentional(self):
         lines = (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
         dependencies = [
             line.strip() for line in lines if line.strip() and not line.strip().startswith("#")
         ]
 
-        self.assertEqual(dependencies, [])
+        # 允许清单：加新依赖必须同时改这里，逼自己在评审里解释一遍为什么标准库不够
+        self.assertEqual(dependencies, ["openpyxl>=3.1"])
 
 
 class ScoreImportTests(unittest.TestCase):

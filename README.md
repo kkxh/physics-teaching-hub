@@ -54,6 +54,15 @@ bash scripts/privacy_scan.sh                 # 隐私扫描
 （例如 `python3 hub.py --db /tmp/isolated.db make-report` 可以把读写指向一个隔离库）。
 Phase 1 的三个脚本 `init_db.py` / `import_scores.py` / `make_report.py` 仍然可用，它们只是 `hub.py` 的兼容垫片。
 
+导入自己的成绩表（列约定见 [data/README.md](data/README.md)）：
+
+```bash
+python3 hub.py import-scores --csv 成绩表.csv --exam 十月月考 --exam-date 2026-10-15 --dry-run
+python3 hub.py import-scores --excel 成绩表.xlsx --sheet 成绩 --exam 十月月考 --exam-date 2026-10-15
+```
+
+读 `.xlsx` 需要 `openpyxl`：`python3 -m pip install -r requirements.txt`；其余功能只用标准库。
+
 ## 配置
 
 复制 `config.example.toml` 为 `config.toml` 后按自己的情况修改；`config.toml` 不会进入 Git。

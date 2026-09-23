@@ -16,7 +16,7 @@
 | Phase 1 最小闭环（建库 / 导入 / 报告） | `init_db.py`、`import_scores.py`、`make_report.py`、`schema/phase1_schema.sql` | 已搬运 | 2026-09-23 | **临时 schema**（`phase1-temp`），Phase 2 会替换或扩展；成绩导入只吃虚构演示数据集，正式导入器留给 Phase 2 |
 | 正式 schema 与数据层（Phase 2 地基） | `schema/*.sql`、`db.py`、`init_db.py` | 已搬运 | 2026-09-23 | 按模块拆六个建表文件 + 独立的 `schema_migrations` 记录表；连接统一走 `db.py`（外键默认开）；Phase 1 临时库不自动迁移，走 `--rebuild --yes` 显式重建 |
 | 统一 CLI 入口 | `hub.py` + 三个兼容垫片 | 已搬运 | 2026-09-23 | 上游是多个独立脚本 + 全局 `--db`；这里做成薄分发子命令，旧三脚本保留为垫片；此后只加子命令不加脚本 |
-| 成绩导入 | `importer.py`、`hub.py import-scores` | 进行中 | 2026-09-23 | CSV 导入已落地（P2.1a）：身份按 uid 优先、姓名歧义报错、dry-run 与执行同条件、单事务、0 分合法；Excel（P2.1b）待做。上游从真实成绩表直接导入，这里先 CSV + 显式列映射 |
+| 成绩导入 | `importer.py`、`hub.py import-scores` | 已搬运 | 2026-09-23 | CSV 与 Excel（P2.1a/P2.1b）都支持：身份按 uid 优先、姓名歧义报错、dry-run 与执行同条件、单事务、0 分合法、列名可映射。差异：上游直接吃真实成绩表且姓名可能静默取第一条；这里要求显式列映射，并新增唯一的第三方依赖 `openpyxl`（MIT，仅用于读 .xlsx） |
 | 作业与订正 | — | 未开始 | — | — |
 | 错因与行为记录 | — | 未开始 | — | — |
 | 学生画像与能力计算 | — | 未开始 | — | — |

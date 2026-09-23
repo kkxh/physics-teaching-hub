@@ -227,7 +227,7 @@ P2.6 依赖 P2.4+P2.7；P2.8/P2.9 在 P2.6 之后。
 - 新模块（`importer.py` 等）落地时同步加进 `tests/test_labels.py` 的 `SCANNED_MODULES`，
   否则 P1.4 的「代码里不出现学科/学段硬编码」会悄悄失守。
 
-**P2.1b Excel 支持（引入 openpyxl）**
+**P2.1b Excel 支持（引入 openpyxl）｜已完成 2026-09-23**
 - `requirements.txt` 追加 `openpyxl`（MIT），提交信息说明标准库无可用 xlsx 解析。
 - 命令：`hub.py import-scores --excel EXCEL文件 [--sheet 表名]`，其余参数与 CSV 一致。
 - **CI 目前只安装 `requirements-dev.txt`**：本步要同时让 CI 装上 `requirements.txt`

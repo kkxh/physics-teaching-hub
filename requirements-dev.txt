@@ -1,3 +1,6 @@
 # 开发依赖
 #
-# 测试使用标准库 unittest，不需要额外依赖。
+# 测试使用标准库 unittest；Excel 相关测试需要运行时依赖，所以这里带上它。
+# 用法：python3 -m pip install -r requirements-dev.txt
+
+-r requirements.txt
