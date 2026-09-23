@@ -58,6 +58,7 @@ python3 make_report.py         # 生成 Markdown 报告（outputs/）
 
 一次只搬一个模块，按「纯逻辑 → 数据层 → 业务动作 → 分析与输出 → 界面」的顺序推进。
 每个模块的完成定义见 `AGENTS.md` 第 4 节，进度记入 `docs/MIGRATION_LEDGER.md`。
+小步清单、模块顺序与评审点见 [PHASE2_PLAN.md](PHASE2_PLAN.md)。
 
 验收（累进）：每完成一批，仓库能跑通一条端到端演示流程。
 
