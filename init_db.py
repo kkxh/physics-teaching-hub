@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import config_loader
+import db as db_module
 import seed_demo_data
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schema"
@@ -46,34 +47,21 @@ EXPECTED_TABLES_BY_FILE: Mapping[str, tuple[str, ...]] = {
     "alerts.sql": ("alerts", "follow_ups"),
 }
 
-SCHEMA_VERSION = "phase2"
-# Phase 1 的临时 schema：表名与字段不承诺兼容，改用正式 schema 时必须显式重建。
-PHASE1_SCHEMA_VERSION = "phase1-temp"
+SCHEMA_VERSION = db_module.SCHEMA_VERSION
+PHASE1_SCHEMA_VERSION = db_module.PHASE1_SCHEMA_VERSION
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
-    """打开数据库连接：行按名字取，并显式开启外键（SQLite 默认是关的）。
-
-    P2.0 的数据层会把它搬进 db.py；这里先保持为兼容入口。
-    """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    """兼容入口：Phase 1 的脚本与测试从这里拿连接，实际走 db.connect。"""
+    return db_module.connect(db_path)
 
 
 def table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-    ).fetchone()
-    return row is not None
+    return db_module.table_exists(conn, name)
 
 
 def schema_version(conn: sqlite3.Connection) -> str | None:
-    if not table_exists(conn, "meta"):
-        return None
-    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-    return None if row is None else str(row["value"])
+    return db_module.schema_version(conn)
 
 
 def apply_schema(conn: sqlite3.Connection) -> None:

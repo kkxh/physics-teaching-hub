@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import config_loader
+import db as db_module
 import init_db
 import teaching_calendar
 
@@ -194,8 +195,9 @@ def main(argv: list[str] | None = None) -> int:
                 "请先运行 python3 init_db.py --demo 与 python3 import_scores.py。"
             )
 
-        conn = init_db.connect(config.paths.database)
+        conn = db_module.connect(config.paths.database)
         try:
+            db_module.require_schema(conn)
             path = write_report(config, conn)
         finally:
             conn.close()

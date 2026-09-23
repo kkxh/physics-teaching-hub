@@ -17,6 +17,7 @@ import sys
 from typing import Any, Mapping
 
 import config_loader
+import db as db_module
 import init_db
 import seed_demo_data
 
@@ -110,9 +111,9 @@ def main(argv: list[str] | None = None) -> int:
         dataset = seed_demo_data.load_or_create_dataset(config)
         seed_demo_data.validate_dataset_for_import(dataset, config)
 
-        conn = init_db.connect(config.paths.database)
+        conn = db_module.connect(config.paths.database)
         try:
-            init_db.apply_schema(conn)
+            db_module.require_schema(conn)
             counts = import_exam_scores(conn, dataset)
         finally:
             conn.close()
