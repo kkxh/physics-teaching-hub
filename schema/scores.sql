@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS exams (
     exam_key   TEXT NOT NULL UNIQUE,
     name       TEXT NOT NULL,
     exam_date  TEXT NOT NULL,
-    full_score REAL NOT NULL,
+    full_score REAL NOT NULL CHECK (full_score > 0),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS exam_scores (
     id         INTEGER PRIMARY KEY,
     exam_id    INTEGER NOT NULL REFERENCES exams(id),
     student_id INTEGER NOT NULL REFERENCES students(id),
-    score      REAL NOT NULL,
+    score      REAL NOT NULL CHECK (score >= 0),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (exam_id, student_id)
 );
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS exam_items (
     id         INTEGER PRIMARY KEY,
     exam_id    INTEGER NOT NULL REFERENCES exams(id),
     item_no    TEXT NOT NULL,
-    full_score REAL NOT NULL,
+    full_score REAL NOT NULL CHECK (full_score > 0),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (exam_id, item_no)
 );
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS item_scores (
     id         INTEGER PRIMARY KEY,
     item_id    INTEGER NOT NULL REFERENCES exam_items(id),
     student_id INTEGER NOT NULL REFERENCES students(id),
-    score      REAL NOT NULL,
+    score      REAL NOT NULL CHECK (score >= 0),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (item_id, student_id)
 );

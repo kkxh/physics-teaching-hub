@@ -20,6 +20,21 @@ if str(ROOT) not in sys.path:
 import config_loader  # noqa: E402
 import init_db  # noqa: E402
 
+CONFIG_TEXT = "\n".join(
+    (
+        "[semester]",
+        'starts_on = "2026-09-01"',
+        'ends_on = "2027-01-22"',
+        "[paths]",
+        'database = "data/x.db"',
+        'output_dir = "out"',
+        "[classes]",
+        'names = ["高一(A)班"]',
+        "[demo]",
+        "students_per_class = 3",
+    )
+)
+
 
 def make_config(base: Path, **demo: Any) -> config_loader.AppConfig:
     return config_loader.parse_config(
@@ -111,8 +126,66 @@ class SchemaFileTests(unittest.TestCase):
         delta = abs((datetime.now(timezone.utc) - parsed).total_seconds())
         self.assertLess(delta, 120, msg=f"created_at 看起来不是 UTC：{stored}")
 
+    def test_score_constraints_are_enforced(self):
+        with self.conn:
+            self.conn.execute("INSERT INTO classes (name) VALUES ('高一(A)班')")
+            self.conn.execute(
+                "INSERT INTO students (student_uid, name, class_id) VALUES ('x-01', '学生01', 1)"
+            )
+            self.conn.execute(
+                """
+                INSERT INTO exams (exam_key, name, exam_date, full_score)
+                VALUES ('demo', '演示考试', '2026-10-01', 100)
+                """
+            )
 
-class InitDatabaseTests(unittest.TestCase):
+        cases = (
+            "INSERT INTO exams (exam_key, name, exam_date, full_score) VALUES ('bad', '零分考试', '2026-10-02', 0)",
+            "INSERT INTO exam_scores (exam_id, student_id, score) VALUES (1, 1, -1)",
+        )
+        for sql in cases:
+            with self.subTest(sql=sql[:48]):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    with self.conn:
+                        self.conn.execute(sql)
+
+    def test_expected_indexes_exist(self):
+        names = {
+            str(row["name"])
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            )
+        }
+
+        for expected in (
+            "idx_students_class",
+            "idx_exam_scores_student",
+            "idx_assignments_class",
+            "idx_error_records_assignment",
+        ):
+            with self.subTest(index=expected):
+                self.assertIn(expected, names)
+
+
+class InitDatabaseHelpersMixin:
+    def insert_marker_class(self, name: str) -> None:
+        conn = sqlite3.connect(self.config.paths.database)
+        try:
+            with conn:
+                conn.execute("INSERT INTO classes (name) VALUES (?)", (name,))
+        finally:
+            conn.close()
+
+    def has_class(self, name: str) -> bool:
+        conn = sqlite3.connect(self.config.paths.database)
+        try:
+            row = conn.execute("SELECT 1 FROM classes WHERE name = ?", (name,)).fetchone()
+        finally:
+            conn.close()
+        return row is not None
+
+
+class InitDatabaseTests(InitDatabaseHelpersMixin, unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -174,26 +247,46 @@ class InitDatabaseTests(unittest.TestCase):
         self.assertEqual((first["classes"], first["students"]), (1, 3))
         self.assertEqual((second["classes"], second["students"]), (1, 3))
 
+    def test_rebuild_replaces_a_current_database_too(self):
+        # --rebuild 是对「重建」的明确要求，版本已经是 phase2 也要真的重建
+        init_db.init_database(self.config)
+        self.insert_marker_class("标记班")
+
+        summary = init_db.init_database(self.config, rebuild=True, confirmed=True)
+
+        self.assertTrue(summary["removed"])
+        self.assertFalse(self.has_class("标记班"))
+
+    def test_corrupt_database_is_reported(self):
+        database = self.config.paths.database
+        database.parent.mkdir(parents=True, exist_ok=True)
+        database.write_bytes(b"this is not a database")
+
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            init_db.init_database(self.config)
+
+        message = str(ctx.exception)
+        self.assertIn("SQLite", message)
+        self.assertIn("--rebuild", message)
+
+    def test_rebuild_recovers_from_a_corrupt_database(self):
+        database = self.config.paths.database
+        database.parent.mkdir(parents=True, exist_ok=True)
+        database.write_bytes(b"this is not a database")
+
+        summary = init_db.init_database(self.config, rebuild=True, confirmed=True)
+
+        self.assertIn(database, summary["removed"])
+        conn = init_db.connect(database)
+        try:
+            self.assertEqual(init_db.schema_version(conn), "phase2")
+        finally:
+            conn.close()
+
     def test_cli_reports_rebuild(self):
         self.write_phase1_database()
         config_path = self.base / "config.toml"
-        config_path.write_text(
-            "\n".join(
-                (
-                    "[semester]",
-                    'starts_on = "2026-09-01"',
-                    'ends_on = "2027-01-22"',
-                    "[paths]",
-                    'database = "data/x.db"',
-                    'output_dir = "out"',
-                    "[classes]",
-                    'names = ["高一(A)班"]',
-                    "[demo]",
-                    "students_per_class = 3",
-                )
-            ),
-            encoding="utf-8",
-        )
+        config_path.write_text(CONFIG_TEXT, encoding="utf-8")
         err = io.StringIO()
 
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):

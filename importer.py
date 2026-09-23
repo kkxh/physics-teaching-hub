@@ -352,14 +352,21 @@ def build_import_plan(
     exam_date: str,
     full_score: float,
 ) -> ImportPlan:
-    """把 CSV 行匹配到库内学生；dry-run 与真正执行都走这里。"""
-    _, exam_key, exam_exists = resolve_exam(
+    """把成绩表行匹配到库内学生；dry-run 与真正执行都走这里。"""
+    existing_exam, exam_key, exam_exists = resolve_exam(
         conn, exam_name=exam_name, exam_date=exam_date, full_score=full_score, create=False
     )
 
     resolved: list[ResolvedScore] = []
     seen: set[int] = set()
     warnings: list[str] = []
+    if existing_exam is not None:
+        stored_full_score = float(existing_exam["full_score"])
+        if abs(stored_full_score - float(full_score)) > 1e-9:
+            warnings.append(
+                f"库里这场考试的满分是 {stored_full_score:g}，本次指定 {float(full_score):g}；"
+                "导入后按本次指定的满分更新。"
+            )
     for row in rows:
         student = resolve_student(conn, student_uid=row.student_uid, name=row.name)
         student_id = int(student["id"])
@@ -398,6 +405,7 @@ def build_import_plan(
 def apply_import_plan(conn: sqlite3.Connection, plan: ImportPlan) -> dict[str, int]:
     """按计划写入成绩：单事务，出错整体回滚。"""
     created_exam = 0
+    full_score_updated = 0
     written = 0
     with conn:
         row, _, _ = resolve_exam(
@@ -411,6 +419,14 @@ def apply_import_plan(conn: sqlite3.Connection, plan: ImportPlan) -> dict[str, i
         created_exam = 0 if plan.exam_exists else 1
         exam_id = int(row["id"])
 
+        stored_full_score = float(row["full_score"])
+        if abs(stored_full_score - float(plan.full_score)) > 1e-9:
+            conn.execute(
+                "UPDATE exams SET full_score = ? WHERE id = ?",
+                (float(plan.full_score), exam_id),
+            )
+            full_score_updated = 1
+
         for item in plan.scores:
             conn.execute(
                 """
@@ -422,7 +438,11 @@ def apply_import_plan(conn: sqlite3.Connection, plan: ImportPlan) -> dict[str, i
             )
             written += 1
 
-    return {"exams_created": created_exam, "scores_written": written}
+    return {
+        "exams_created": created_exam,
+        "full_score_updated": full_score_updated,
+        "scores_written": written,
+    }
 
 
 def import_scores_from_csv(

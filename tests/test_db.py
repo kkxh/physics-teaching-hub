@@ -87,17 +87,40 @@ class ConnectTests(unittest.TestCase):
             with self.assertRaises(config_loader.ConfigError) as ctx:
                 db_module.require_schema(conn)
 
-            self.assertIn("init_db.py", str(ctx.exception))
+            self.assertIn("hub.py", str(ctx.exception))
+
+    def test_corrupt_database_file_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "broken.db"
+            path.write_bytes(b"this is not a database")
+            conn = db_module.connect(path)
+            self.addCleanup(conn.close)
+
+            with self.assertRaises(config_loader.ConfigError) as ctx:
+                db_module.require_schema(conn)
+
+            message = str(ctx.exception)
+            self.assertIn("SQLite", message)
+            self.assertIn("--rebuild", message)
 
 
 class ConnectionGuardTests(unittest.TestCase):
     """除 db.py 外，模块里不该再自己开连接（否则外键 PRAGMA 会被绕过）。"""
 
+    EXCLUDED_DIRS = {".venv", "venv", "tests", "__pycache__"}
+
+    def production_modules(self) -> list[Path]:
+        modules = []
+        for path in sorted(ROOT.rglob("*.py")):
+            parts = set(path.relative_to(ROOT).parts)
+            if path.name == "db.py" or parts & self.EXCLUDED_DIRS:
+                continue
+            modules.append(path)
+        return modules
+
     def test_only_db_module_opens_connections(self):
         offenders: list[str] = []
-        for path in sorted(ROOT.glob("*.py")):
-            if path.name == "db.py":
-                continue
+        for path in self.production_modules():
             for lineno in connect_calls(path):
                 offenders.append(f"{path.name}:{lineno}")
 
@@ -105,6 +128,17 @@ class ConnectionGuardTests(unittest.TestCase):
             offenders,
             [],
             msg=f"这些地方自己开了 sqlite 连接，请改用 db.connect：{offenders}",
+        )
+
+    def test_guard_scans_subdirectories_too(self):
+        scanned = {path.name for path in self.production_modules()}
+
+        self.assertIn("hub.py", scanned)
+        self.assertIn("importer.py", scanned)
+        self.assertNotIn("db.py", scanned)
+        self.assertFalse(
+            [path for path in self.production_modules() if path.parent != ROOT and "tests" not in path.parts],
+            msg="子目录里的模块也应被扫描（Phase 3 若加包结构，这条会提醒更新排除清单）",
         )
 
     def test_guard_actually_detects_a_connection(self):

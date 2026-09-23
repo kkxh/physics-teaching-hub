@@ -136,6 +136,17 @@ class SubcommandTests(HubCliTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("--demo", result.stderr)
 
+    def test_corrupt_database_reports_a_friendly_error(self):
+        database = self.config.paths.database
+        database.parent.mkdir(parents=True, exist_ok=True)
+        database.write_bytes(b"this is not a database")
+
+        result = self.run_hub("--config", str(self.config_path), "make-report")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("SQLite", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
 
 class ShimTests(HubCliTestCase):
     """Phase 1 的三个脚本继续可用，效果与 hub 子命令一致。"""

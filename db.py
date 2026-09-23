@@ -30,9 +30,12 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 
 def table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-    ).fetchone()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+    except sqlite3.DatabaseError as exc:
+        raise _database_error(exc) from exc
     return row is not None
 
 
@@ -40,8 +43,21 @@ def schema_version(conn: sqlite3.Connection) -> str | None:
     """库里的 schema 版本；没有 meta 表或没写版本时返回 None。"""
     if not table_exists(conn, "meta"):
         return None
-    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    try:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+    except sqlite3.DatabaseError as exc:
+        raise _database_error(exc) from exc
     return None if row is None else str(row["value"])
+
+
+def _database_error(exc: sqlite3.DatabaseError) -> config_loader.ConfigError:
+    """把「文件不是 SQLite 库 / 已损坏」这类底层错误翻成可操作的提示。"""
+    return config_loader.ConfigError(
+        f"读数据库失败：{exc}；文件可能不是有效的 SQLite 库或已经损坏。"
+        "可以加 --rebuild --yes 重建（会删掉这个文件），或用 --db 指向别的库。"
+    )
 
 
 def require_schema(
@@ -55,9 +71,9 @@ def require_schema(
     if actual == PHASE1_SCHEMA_VERSION:
         raise config_loader.ConfigError(
             f"这个库还是 Phase 1 的临时 schema（{PHASE1_SCHEMA_VERSION}），"
-            f"当前要求 {expected}；请用 python3 init_db.py --demo --rebuild --yes 重建。"
+            f"当前要求 {expected}；请用 python3 hub.py init-db --demo --rebuild --yes 重建。"
         )
     raise config_loader.ConfigError(
         f"数据库 schema 版本是 {actual or '未知'}，当前要求 {expected}；"
-        "请先运行 python3 init_db.py --demo 建库（必要时加 --rebuild --yes 重建）。"
+        "请先运行 python3 hub.py init-db --demo 建库（必要时加 --rebuild --yes 重建）。"
     )

@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS error_tags (
 );
 
 -- 2. 错因记录
+--    时间语义：recorded_at 是「这件事发生的时间」（业务时间，可由使用者指定），
+--    created_at 是「这一行写入库的时间」，两者都存 UTC。
 CREATE TABLE IF NOT EXISTS error_records (
     id            INTEGER PRIMARY KEY,
     student_id    INTEGER NOT NULL REFERENCES students(id),
@@ -28,6 +30,7 @@ CREATE TABLE IF NOT EXISTS error_records (
 
 CREATE INDEX IF NOT EXISTS idx_error_records_student ON error_records(student_id, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_error_records_tag ON error_records(tag_id);
+CREATE INDEX IF NOT EXISTS idx_error_records_assignment ON error_records(assignment_id);
 
 -- 3. 行为记录（课堂/课后观察）
 CREATE TABLE IF NOT EXISTS behavior_records (

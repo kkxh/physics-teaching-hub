@@ -243,6 +243,33 @@ class ExamMatchingTests(ImportTestCase):
         rows = self.query("SELECT score FROM exam_scores")
         self.assertEqual([row["score"] for row in rows], [90.0])
 
+    def test_changed_full_score_is_updated_with_a_warning(self):
+        self.import_csv("student_uid,score\n高一(A)班-01,80\n", full_score=100)
+
+        second = self.import_csv("student_uid,score\n高一(A)班-01,90\n", full_score=150)
+
+        self.assertEqual(second["full_score_updated"], 1)
+        self.assertIn("满分", "".join(second["plan"].warnings))
+        stored = self.query("SELECT full_score FROM exams")[0]["full_score"]
+        self.assertEqual(stored, 150.0)
+
+    def test_same_full_score_needs_no_update(self):
+        self.import_csv("student_uid,score\n高一(A)班-01,80\n", full_score=100)
+
+        second = self.import_csv("student_uid,score\n高一(A)班-02,70\n", full_score=100)
+
+        self.assertEqual(second["full_score_updated"], 0)
+        self.assertEqual(second["plan"].warnings, ())
+
+    def test_dry_run_does_not_update_the_full_score(self):
+        self.import_csv("student_uid,score\n高一(A)班-01,80\n", full_score=100)
+
+        plan = self.import_csv("student_uid,score\n高一(A)班-01,90\n", full_score=150, dry_run=True)
+
+        self.assertIn("满分", "".join(plan["plan"].warnings))
+        stored = self.query("SELECT full_score FROM exams")[0]["full_score"]
+        self.assertEqual(stored, 100.0)
+
 
 class LikeEscapeTests(ImportTestCase):
     def test_escape_like_handles_wildcards_and_backslash(self):

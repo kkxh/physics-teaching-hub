@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS homework_submissions (
 
 CREATE INDEX IF NOT EXISTS idx_submissions_assignment ON homework_submissions(assignment_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_student ON homework_submissions(student_id);
+-- 按班级统计完成率要按 class_id 过滤
+CREATE INDEX IF NOT EXISTS idx_assignments_class ON homework_assignments(class_id);
 
 -- 3. 订正记录：一份提交最多一条订正记录
 CREATE TABLE IF NOT EXISTS corrections (

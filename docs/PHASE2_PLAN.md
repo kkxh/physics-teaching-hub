@@ -607,6 +607,24 @@ python3 hub.py make-dashboard
 
 ## 修订记录
 
+### R1 评审结论（2026-09-23，P2.0 范围）
+
+结论：结构可用，继续推进；发现 3 条必修、4 条建议、若干 nits，**全部已修**（同一次提交内附回归测试）。
+
+| 编号 | 问题 | 处理 |
+| --- | --- | --- |
+| R1-1 | 已是 phase2 的库上 `--rebuild --yes` 静默无效（实测标记行仍在） | 改为无条件重建（仍要求 `--yes`），并打印被删除的文件 |
+| R1-2 | 文件不是 SQLite 库时抛原始 traceback | `db.py` 把 `sqlite3.DatabaseError` 翻成可操作 `ConfigError`；`hub.py` 顶层兜底 `sqlite3.Error`，统一退出码 2 |
+| R1-3 | 二次导入改 `--full-score` 静默不生效（实测库里仍是旧值） | 检测到不一致时更新满分并输出告警；dry-run 只告警不写库 |
+| R1-4 | schema 缺 CHECK 约束（可能写入负分、满分为 0） | `scores.sql` 补 `score >= 0`、`full_score > 0` |
+| R1-5 | `homework_assignments.class_id`、`error_records.assignment_id` 缺索引 | 两个索引补齐，并有「索引存在」的断言 |
+| R1-6 | 连接守护测试只扫顶层 `*.py` | 改为递归扫描并排除 `tests/`、虚拟环境目录 |
+| R1-7 | `db.py` 的提示指向 `init_db.py`，与 hub 其它提示不一致 | 统一指向 `hub.py` |
+| R1-8~11 | 文档头表述过时、迁移非原子性未注释、`recorded_at`/`created_at` 语义未写明、测试内联配置重复 | 一并修掉 |
+
+新增约定：`docs/ENGINEERING_NOTES.md` 第 12 条（显式开关要真的生效；底层错误翻译成人话）。
+注：schema 文件改动只影响**新建**库，已有本地 phase2 库请用 `init-db --demo --rebuild --yes` 重建（Phase 2 未发布，不补迁移文件）。
+
 2026-09-23（入库前修订）：
 
 1. `alerts.student_id` 的外键由 `→alerts` 改正为 `→students`（原稿笔误）。

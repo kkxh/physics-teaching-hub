@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -173,6 +174,8 @@ def run_import_scores(config: config_loader.AppConfig, args: argparse.Namespace)
             f"（考试：{plan.exam_name} {plan.exam_date}，"
             f"{'新建考试' if result['exams_created'] else '沿用已有考试'}）"
         )
+        if result["full_score_updated"]:
+            print(f"已按本次参数更新这场考试的满分：{plan.full_score:g}")
         return 0
     if not args.demo:
         print(
@@ -215,6 +218,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_make_report(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
+        return 2
+    except sqlite3.Error as exc:
+        print(
+            f"[错误] 读写数据库失败：{exc}；"
+            "文件可能不是有效的 SQLite 库或已经损坏，可以用 --db 指向别的库，"
+            "或重建（init-db --demo --rebuild --yes）。",
+            file=sys.stderr,
+        )
         return 2
 
     print(f"[提示] 未知子命令：{args.command}", file=sys.stderr)

@@ -5,7 +5,8 @@
     python3 init_db.py --demo --config my.toml
     python3 init_db.py --demo --rebuild --yes    # 删掉旧库重建（Phase 1 临时库必须这样处理）
 
-Phase 1 只支持虚构演示数据：名单里一旦出现不符合虚构模式的姓名，直接拒绝导入。
+演示导入只接受虚构名单：一旦出现不符合虚构模式的姓名就直接拒绝；
+真实成绩走 `hub.py import-scores`（CSV / Excel）。
 建库是幂等的：重复执行不会产生重复行，也不会清掉已有数据。
 
 schema 由 schema/*.sql 按固定顺序建好（core → scores → homework → errors → profile → alerts），
@@ -88,7 +89,11 @@ def apply_schema(conn: sqlite3.Connection) -> None:
 
 
 def apply_migrations(conn: sqlite3.Connection) -> list[str]:
-    """执行 schema/migrations/ 里还没应用过的迁移，返回本次应用的迁移名。"""
+    """执行 schema/migrations/ 里还没应用过的迁移，返回本次应用的迁移名。
+
+    注意：脚本执行（executescript 会隐式提交）与写 schema_migrations 记录不在同一事务里，
+    所以每个迁移文件都必须**幂等**——万一记录没写上，下次重放也不能出问题。
+    """
     applied = {
         str(row["name"]) for row in conn.execute("SELECT name FROM schema_migrations")
     }
@@ -181,28 +186,29 @@ def init_database(
     database.parent.mkdir(parents=True, exist_ok=True)
     removed: list[Path] = []
 
-    if database.exists():
+    if rebuild:
+        if database.exists():
+            if not confirmed:
+                raise config_loader.ConfigError(
+                    f"--rebuild 会删除现有数据库：{database}；确认无误后请再加 --yes。"
+                )
+            removed = remove_database(database)
+    elif database.exists():
         conn = connect(database)
         try:
             existing = schema_version(conn)
         finally:
             conn.close()
         if existing != SCHEMA_VERSION:
-            if not rebuild:
-                hint = (
-                    "Phase 1 的临时库不会自动迁移"
-                    if existing == PHASE1_SCHEMA_VERSION
-                    else "schema 版本对不上"
-                )
-                raise config_loader.ConfigError(
-                    f"{hint}：{database} 当前是 {existing or '未知版本'}，本版本要求 {SCHEMA_VERSION}；"
-                    "请加 --rebuild --yes 重建（会删掉这个库）。"
-                )
-            if not confirmed:
-                raise config_loader.ConfigError(
-                    f"--rebuild 会删除现有数据库：{database}；确认无误后请再加 --yes。"
-                )
-            removed = remove_database(database)
+            hint = (
+                "Phase 1 的临时库不会自动迁移"
+                if existing == PHASE1_SCHEMA_VERSION
+                else "schema 版本对不上"
+            )
+            raise config_loader.ConfigError(
+                f"{hint}：{database} 当前是 {existing or '未知版本'}，本版本要求 {SCHEMA_VERSION}；"
+                "请加 --rebuild --yes 重建（会删掉这个库）。"
+            )
 
     dataset = seed_demo_data.load_or_create_dataset(config)
     seed_demo_data.validate_dataset_for_import(dataset, config)
