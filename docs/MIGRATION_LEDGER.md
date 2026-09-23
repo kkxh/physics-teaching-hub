@@ -16,7 +16,7 @@
 | Phase 1 最小闭环（建库 / 导入 / 报告） | `init_db.py`、`import_scores.py`、`make_report.py`、`schema/phase1_schema.sql` | 已搬运 | 2026-09-23 | **临时 schema**（`phase1-temp`），Phase 2 会替换或扩展；成绩导入只吃虚构演示数据集，正式导入器留给 Phase 2 |
 | 正式 schema 与数据层（Phase 2 地基） | `schema/*.sql`、`db.py`、`init_db.py` | 已搬运 | 2026-09-23 | 按模块拆六个建表文件 + 独立的 `schema_migrations` 记录表；连接统一走 `db.py`（外键默认开）；Phase 1 临时库不自动迁移，走 `--rebuild --yes` 显式重建 |
 | 统一 CLI 入口 | `hub.py` + 三个兼容垫片 | 已搬运 | 2026-09-23 | 上游是多个独立脚本 + 全局 `--db`；这里做成薄分发子命令，旧三脚本保留为垫片；此后只加子命令不加脚本 |
-| 成绩导入 | — | 未开始 | — | Phase 2 搬正式导入器（多格式、真实成绩表） |
+| 成绩导入 | `importer.py`、`hub.py import-scores` | 进行中 | 2026-09-23 | CSV 导入已落地（P2.1a）：身份按 uid 优先、姓名歧义报错、dry-run 与执行同条件、单事务、0 分合法；Excel（P2.1b）待做。上游从真实成绩表直接导入，这里先 CSV + 显式列映射 |
 | 作业与订正 | — | 未开始 | — | — |
 | 错因与行为记录 | — | 未开始 | — | — |
 | 学生画像与能力计算 | — | 未开始 | — | — |
@@ -43,11 +43,11 @@ Phase 1（通用化地基）已于 2026-09-23 收口：配置、路径与时间�
 
 | 通用改进点 | 本仓库落点 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| 身份一律按 ID 关联，姓名匹配歧义要报错 | Phase 2 数据层与导入器 | 待吸收 | NOTES 第 1 条 |
+| 身份一律按 ID 关联，姓名匹配歧义要报错 | `importer.resolve_student` | 已吸收 | 2026-09-23：uid 优先，姓名 0 条/多条都报错并有单测 |
 | 入库时间统一 UTC，展示再转时区 | `schema/phase1_schema.sql` | 已吸收 | 2026-09-23：时间列用 `datetime('now')`，报告按配置时区显示 |
 | 连接开启外键、schema 完整性校验、缓存按库路径记忆 | `init_db.py` | 已吸收 | 2026-09-23：连接开 `PRAGMA foreign_keys`、按完整表清单校验；本方案没有进程内全局缓存，每次按库文件判断 |
-| 一组写入放同一事务，dry-run 与执行同条件 | Phase 2 数据层 | 待吸收 | NOTES 第 4 条 |
-| SQL 参数化；用户输入不做 LIKE 通配符 | Phase 2 起 | 待吸收 | NOTES 第 5 条 |
+| 一组写入放同一事务，dry-run 与执行同条件 | `importer.apply_import_plan` | 已吸收 | 2026-09-23：dry-run 与执行共用同一份 ImportPlan |
+| SQL 参数化；用户输入不做 LIKE 通配符 | `importer.find_students_by_name` | 已吸收 | 2026-09-23：`escape_like` 转义 %/_，有回归测试 |
 | 判空用 `is None`，0 是合法值 | P1.5、P1.6 | 已吸收 | 2026-09-23：0 分成绩有专门单测 |
 | 对外调用校验业务错误码，HTTP 200 不算成功 | Phase 2 | 待吸收 | NOTES 第 7 条 |
 | 本地服务只绑本机，CORS 不用通配符 | Phase 2 | 待吸收 | NOTES 第 8 条 |

@@ -211,7 +211,7 @@ P2.6 依赖 P2.4+P2.7；P2.8/P2.9 在 P2.6 之后。
 
 ### 分两步走
 
-**P2.1a 导入框架 + CSV（标准库，零新依赖）**
+**P2.1a 导入框架 + CSV（标准库，零新依赖）｜已完成 2026-09-23**
 
 - 新增 `importer.py`：通用导入框架
   - `resolve_student(conn, student_uid=None, name=None)`：
@@ -222,7 +222,7 @@ P2.6 依赖 P2.4+P2.7；P2.8/P2.9 在 P2.6 之后。
   - 整批写入**同一事务**，异常整体回滚（约定第 4 条）。
   - 分数判空用 `is None`，0 分合法（约定第 6 条）。
   - 用户输入进 `LIKE` 时转义百分号与下划线（预吸收 #5，约定第 5 条）。
-- 命令：`hub.py import-scores --csv CSV文件 --exam 考试名 --exam-date 日期 [--dry-run]`
+- 命令：`hub.py import-scores --csv CSV文件 --exam 考试名 --exam-date 日期 [--full-score 100] [--columns 映射] [--dry-run]`
 - CSV 列约定写进 `data/README.md`：`student_uid, name, score`（表头可配置 `--columns` 映射）。
 - 新模块（`importer.py` 等）落地时同步加进 `tests/test_labels.py` 的 `SCANNED_MODULES`，
   否则 P1.4 的「代码里不出现学科/学段硬编码」会悄悄失守。

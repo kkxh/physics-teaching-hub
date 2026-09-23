@@ -122,13 +122,13 @@ class SubcommandTests(HubCliTestCase):
             conn.close()
         self.assertEqual(scores, 0)
 
-    def test_import_scores_csv_is_not_implemented_yet(self):
+    def test_import_scores_csv_needs_exam_metadata(self):
         result = self.run_hub(
             "--config", str(self.config_path), "import-scores", "--csv", "scores.csv"
         )
 
         self.assertEqual(result.returncode, 2)
-        self.assertIn("P2.1", result.stderr)
+        self.assertIn("--exam", result.stderr)
 
     def test_init_db_without_demo_is_rejected(self):
         result = self.run_hub("--config", str(self.config_path), "init-db")

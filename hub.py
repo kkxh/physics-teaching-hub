@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 import config_loader
+import importer
 import import_scores
 import init_db
 import make_report
@@ -62,7 +63,18 @@ def build_parser() -> argparse.ArgumentParser:
     scores_parser.add_argument(
         "--demo", action="store_true", help="导入配置里 [demo] 生成的虚构数据集"
     )
-    scores_parser.add_argument("--csv", default=None, help="真实成绩表（P2.1 落地）")
+    scores_parser.add_argument("--csv", default=None, help="成绩表（CSV，UTF-8，带表头）")
+    scores_parser.add_argument("--exam", default=None, help="考试名（与日期一起定位考试）")
+    scores_parser.add_argument("--exam-date", default=None, help="考试日期，YYYY-MM-DD")
+    scores_parser.add_argument(
+        "--full-score", type=float, default=100.0, help="满分，默认 100"
+    )
+    scores_parser.add_argument(
+        "--columns",
+        default=None,
+        help='表头映射，如 "学号=student_uid,姓名=name,分数=score"',
+    )
+    scores_parser.add_argument("--dry-run", action="store_true", help="只预览，不写库")
 
     report_parser = subparsers.add_parser("make-report", help="生成 Markdown 报告")
     add_global_options(report_parser, suppress_defaults=True)
@@ -109,11 +121,41 @@ def run_init_db(config: config_loader.AppConfig, args: argparse.Namespace) -> in
 
 def run_import_scores(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
     if args.csv:
-        print(
-            "[提示] CSV 导入在 P2.1 落地；当前只支持 --demo 导入虚构演示数据。",
-            file=sys.stderr,
+        if not args.exam or not args.exam_date:
+            print(
+                "[提示] 用 --csv 导入时必须同时给 --exam 与 --exam-date："
+                "考试按「名称 + 日期」匹配，日期不同就是另一场考试。",
+                file=sys.stderr,
+            )
+            return 2
+        result = importer.import_scores_from_csv(
+            config,
+            csv_path=args.csv,
+            exam_name=args.exam,
+            exam_date=args.exam_date,
+            full_score=args.full_score,
+            dry_run=args.dry_run,
+            columns_spec=args.columns,
         )
-        return 2
+        plan = result["plan"]
+        for warning in plan.warnings:
+            print(f"[提醒] {warning}")
+        if result["dry_run"]:
+            state = "已存在" if plan.exam_exists else "将新建"
+            students = len({item.student_id for item in plan.scores})
+            print(
+                f"[dry-run] 考试：{plan.exam_name}（{plan.exam_date}，{state}）；"
+                f"待写入 {plan.row_count} 条成绩，涉及 {students} 名学生。"
+            )
+            print("[dry-run] 没有写入任何数据。")
+            return 0
+
+        print(
+            f"已导入成绩：{result['scores_written']} 条"
+            f"（考试：{plan.exam_name} {plan.exam_date}，"
+            f"{'新建考试' if result['exams_created'] else '沿用已有考试'}）"
+        )
+        return 0
     if not args.demo:
         print(
             "[提示] 请明确指定数据来源：--demo 导入虚构演示数据；"

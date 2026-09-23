@@ -77,6 +77,7 @@ SCANNED_MODULES = (
     "config_loader.py",
     "db.py",
     "hub.py",
+    "importer.py",
     "import_scores.py",
     "init_db.py",
     "labels.py",
