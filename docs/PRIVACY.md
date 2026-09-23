@@ -37,8 +37,16 @@
 ## 4. 提交前自检
 
 ```bash
-bash scripts/privacy_scan.sh
+bash scripts/privacy_scan.sh          # 默认：只看会被提交的文件（Git 跟踪的）
+bash scripts/privacy_scan.sh --all    # 再算上未跟踪、但没被 .gitignore 拒绝的文件
+bash scripts/privacy_scan.sh --strict # 发布前审计：整个工作区，连生成物一起看
 ```
+
+默认与 `--all` 都应当通过——跑完最小闭环（产生 `data/*.db`、`demo/*.json`、`outputs/*.md`）之后它们依然通过，
+因为这些生成物都在 `.gitignore` 里，不会被提交。`--strict` 会把这些本机产物一并列出来提醒你，
+那是**本机产物**而不是待提交内容；发布前用它做一次全面审计。
+
+`data/` 目录除 `data/README.md` 外一律禁止入仓；`outputs/`、`demo/`、数据库文件、教学文档同理。
 
 通用规则负责识别绝对路径、密钥特征串、身份证号、手机号与私有风格班号。
 学校名、真实人名这类词无法通用识别，请写进本地私有词表 `.privacy-terms.local`（每行一个关键词，已在 `.gitignore` 中）：
@@ -51,6 +59,9 @@ bash scripts/privacy_scan.sh
 ## 5. 使用者的数据在哪里
 
 使用者的数据库、输出与题库全部位于使用者本机的工作目录，由使用者的 `.gitignore` 拦住，不会进入版本库，也不会上传到任何服务器。
+
+**生成物只在本机**：最小闭环产生的 `data/*.db`、`demo/*.json`、`outputs/*.md` 都落在忽略清单覆盖的位置；
+报告里只写相对路径、不带本机绝对路径，需要分享时可以直接拷走。
 
 ## 6. 发现泄露怎么办
 

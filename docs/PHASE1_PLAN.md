@@ -1,6 +1,6 @@
 # Phase 1 小步清单：通用化地基
 
-> 状态：**进行中**——P1.1、P1.2 已完成（2026-09-21），P1.3、P1.4 已完成（2026-09-22），P1.5、P1.6 已完成（2026-09-23）。每完成一步，就把对应小节标题里的状态补上并写日期。
+> 状态：**Phase 1 已完成**——P1.1、P1.2 完成于 2026-09-21，P1.3、P1.4 完成于 2026-09-22，P1.5～P1.7 完成于 2026-09-23。下一步进入 Phase 2（逐模块搬运），见 [ROADMAP.md](ROADMAP.md)。
 > 范围锚点：[ROADMAP.md](ROADMAP.md) 的 Phase 1。本文件只细化步骤，不扩大范围。
 
 ## 执行约定
@@ -102,7 +102,7 @@
 
 改动文件：`init_db.py`、`import_scores.py`、`make_report.py`（三个新增）、`schema/phase1_schema.sql`（新增）、`tests/test_phase1_loop.py`（新增）、`seed_demo_data.py`、`config_loader.py`、`tests/test_labels.py`、`tests/test_demo_data.py`、`README.md`、`docs/ROADMAP.md`、`docs/MIGRATION_LEDGER.md`。
 
-## P1.7 收口（未开始）
+## P1.7 收口（已完成 2026-09-23）
 
 目标：把 Phase 1 收干净，并证明「别人 clone 或解包一份归档就能跑」。
 
@@ -114,7 +114,7 @@
 - 文档收口：README 能力现状、ROADMAP 顶部状态与 Phase 1 临时 schema 说明、台账状态与差异、隐私文档补一条「生成物只在本机」。
 - 四条检查全绿：编译检查、单元测试、演示数据自检、隐私扫描；CI 绿。
 
-改动文件：`README.md`、`docs/ROADMAP.md`、`docs/MIGRATION_LEDGER.md`、`docs/PRIVACY.md`、`scripts/privacy_scan.sh`、`tests/test_repo_hygiene.py`（新增）。
+改动文件：`README.md`、`docs/ROADMAP.md`、`docs/MIGRATION_LEDGER.md`、`docs/PRIVACY.md`、`scripts/privacy_scan.sh`、`make_report.py`、`tests/test_phase1_loop.py`、`tests/test_repo_hygiene.py`（新增）。
 
 ---
 

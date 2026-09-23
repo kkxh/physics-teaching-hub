@@ -133,6 +133,9 @@ class LoopTests(LoopTestCase):
             self.assertIn(class_name, text)
         self.assertIn("教学周", text)
         self.assertIn(self.config.demo.exams[0].name, text)
+        # 报告要能安全分享：里面只出现相对路径，不带本机绝对路径
+        self.assertNotIn(str(self.config.paths.database), text)
+        self.assertIn("data/physics.db", text)
 
         conn = sqlite3.connect(self.config.paths.database)
         try:

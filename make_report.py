@@ -32,6 +32,14 @@ def format_score(value: Any) -> str:
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
 
 
+def display_path(path: Path, base_dir: Path) -> str:
+    """报告里尽量用相对路径，避免把本机绝对路径带进可分享的文件。"""
+    try:
+        return str(path.relative_to(base_dir))
+    except ValueError:
+        return str(path)
+
+
 def fetch_exam_stats(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         """
@@ -95,7 +103,7 @@ def build_report(config: config_loader.AppConfig, conn: sqlite3.Connection) -> s
         f"- 学段 / 学科：{config.project.stage_label} / {config.project.subject_label}",
         f"- 时区：{config.project.timezone}",
         f"- 生成时间：{now.strftime('%Y-%m-%d %H:%M')}（{config.project.timezone}）",
-        f"- 数据库：{config.paths.database}",
+        f"- 数据库：{display_path(config.paths.database, config.base_dir)}",
         "",
         "## 考试概览",
         "",
