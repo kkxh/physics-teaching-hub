@@ -186,14 +186,14 @@ class LoopTests(LoopTestCase):
         result = self.run_script("import_scores.py")
 
         self.assertEqual(result.returncode, 2)
-        self.assertIn("init_db.py", result.stderr)
+        self.assertIn("init-db", result.stderr)
         self.assertFalse(self.config.paths.database.exists())
 
     def test_make_report_requires_the_database(self):
         result = self.run_script("make_report.py")
 
         self.assertEqual(result.returncode, 2)
-        self.assertIn("init_db.py", result.stderr)
+        self.assertIn("init-db", result.stderr)
 
     def test_init_db_requires_the_demo_flag(self):
         result = self.run_script("init_db.py")

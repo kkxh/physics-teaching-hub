@@ -93,39 +93,43 @@ def import_exam_scores(
     return {"exams": exam_count, "scores": score_count}
 
 
+def import_demo_scores(config: config_loader.AppConfig) -> dict[str, int]:
+    """导入配置里 [demo] 的虚构数据集；返回考试与成绩条数。"""
+    if not config.paths.database.is_file():
+        raise config_loader.ConfigError(
+            f"还没有数据库：{config.paths.database}；"
+            "请先运行 python3 hub.py init-db --demo。"
+        )
+
+    dataset = seed_demo_data.load_or_create_dataset(config)
+    seed_demo_data.validate_dataset_for_import(dataset, config)
+
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        return import_exam_scores(conn, dataset)
+    finally:
+        conn.close()
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="导入虚构演示成绩（Phase 1）")
+    """兼容垫片：等价于 `python3 hub.py import-scores --demo`。"""
+    parser = argparse.ArgumentParser(
+        description="导入虚构演示成绩（兼容 Phase 1 调用方式）"
+    )
     parser.add_argument("--config", default=None, help="配置文件；省略时自动找")
+    parser.add_argument("--db", default=None, help="覆盖数据库路径")
     args = parser.parse_args(argv)
 
-    try:
-        config = config_loader.load_config(
-            config_loader.resolve_cli_config_path(args.config)
-        )
-        if not config.paths.database.is_file():
-            raise config_loader.ConfigError(
-                f"还没有数据库：{config.paths.database}；"
-                "请先运行 python3 init_db.py --demo。"
-            )
+    import hub
 
-        dataset = seed_demo_data.load_or_create_dataset(config)
-        seed_demo_data.validate_dataset_for_import(dataset, config)
-
-        conn = db_module.connect(config.paths.database)
-        try:
-            db_module.require_schema(conn)
-            counts = import_exam_scores(conn, dataset)
-        finally:
-            conn.close()
-    except config_loader.ConfigError as exc:
-        print(f"[错误] {exc}", file=sys.stderr)
-        return 2
-
-    print(
-        f"已导入演示成绩：{counts['exams']} 场考试 / {counts['scores']} 条成绩"
-        f"（数据库：{config.paths.database}）"
-    )
-    return 0
+    forwarded: list[str] = []
+    if args.config:
+        forwarded += ["--config", args.config]
+    if args.db:
+        forwarded += ["--db", args.db]
+    forwarded += ["import-scores", "--demo"]
+    return hub.main(forwarded)
 
 
 if __name__ == "__main__":

@@ -227,48 +227,32 @@ def init_database(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="建库并灌入虚构演示名单（Phase 2）")
+    """兼容垫片：等价于 `python3 hub.py init-db --demo`。"""
+    parser = argparse.ArgumentParser(
+        description="建库并灌入虚构演示名单（兼容 Phase 1 调用方式）"
+    )
     parser.add_argument("--config", default=None, help="配置文件；省略时自动找")
-    parser.add_argument(
-        "--demo",
-        action="store_true",
-        help="导入虚构演示名单（Phase 1 起只支持这一种）",
-    )
-    parser.add_argument(
-        "--rebuild",
-        action="store_true",
-        help="删掉旧库重建（schema 版本不一致时必须显式指定，且要配合 --yes）",
-    )
-    parser.add_argument("--yes", action="store_true", help="确认执行 --rebuild 的删除动作")
+    parser.add_argument("--db", default=None, help="覆盖数据库路径")
+    parser.add_argument("--demo", action="store_true", help="导入虚构演示名单")
+    parser.add_argument("--rebuild", action="store_true", help="删掉旧库重建")
+    parser.add_argument("--yes", action="store_true", help="确认 --rebuild 的删除动作")
     args = parser.parse_args(argv)
 
-    if not args.demo:
-        print(
-            "[提示] 只支持 --demo：请用 python3 init_db.py --demo 建演示库；"
-            "真实成绩导入在 Phase 2 的 import-scores。",
-            file=sys.stderr,
-        )
-        return 2
+    import hub
 
-    try:
-        config = config_loader.load_config(
-            config_loader.resolve_cli_config_path(args.config), env=None
-        )
-        summary = init_database(config, rebuild=args.rebuild, confirmed=args.yes)
-    except config_loader.ConfigError as exc:
-        print(f"[错误] {exc}", file=sys.stderr)
-        return 2
-
-    for path in summary["removed"]:
-        print(f"已删除旧库文件：{path}")
-    print(f"已建库：{summary['database']}（schema: {summary['schema_version']}）")
-    if summary["migrations"]:
-        print(f"已应用迁移：{'、'.join(summary['migrations'])}")
-    print(
-        f"已导入演示名单：{summary['classes']} 个虚构班级 / "
-        f"{summary['students']} 名学生（数据集：{summary['dataset']}）"
-    )
-    return 0
+    forwarded: list[str] = []
+    if args.config:
+        forwarded += ["--config", args.config]
+    if args.db:
+        forwarded += ["--db", args.db]
+    forwarded += ["init-db"]
+    if args.demo:
+        forwarded += ["--demo"]
+    if args.rebuild:
+        forwarded += ["--rebuild"]
+    if args.yes:
+        forwarded += ["--yes"]
+    return hub.main(forwarded)
 
 
 if __name__ == "__main__":

@@ -37,9 +37,9 @@ git clone https://github.com/kkxh/physics-teaching-hub.git
 cd physics-teaching-hub
 
 # 三条命令跑通最小闭环（虚构演示数据；没复制配置也能跑，会用 config.example.toml）
-python3 init_db.py --demo                    # 建库 + 灌入虚构名单
-python3 import_scores.py                     # 导入演示成绩
-python3 make_report.py                       # 生成报告：outputs/phase1_report.md
+python3 hub.py init-db --demo                # 建库 + 灌入虚构名单
+python3 hub.py import-scores --demo          # 导入演示成绩
+python3 hub.py make-report                   # 生成报告：outputs/phase1_report.md
 
 # 自检
 python3 -m unittest discover -s tests -t .   # 跑测试
@@ -49,6 +49,10 @@ bash scripts/privacy_scan.sh                 # 隐私扫描
 ```
 
 需要 Python 3.11 或更高版本（配置解析使用标准库 `tomllib`）；最小闭环只用标准库，不需要安装依赖。
+
+`hub.py` 是 Phase 2 起的统一入口：全局选项 `--config` / `--db` 放在子命令之前
+（例如 `python3 hub.py --db /tmp/isolated.db make-report` 可以把读写指向一个隔离库）。
+Phase 1 的三个脚本 `init_db.py` / `import_scores.py` / `make_report.py` 仍然可用，它们只是 `hub.py` 的兼容垫片。
 
 ## 配置
 

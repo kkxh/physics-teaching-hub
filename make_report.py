@@ -180,34 +180,38 @@ def write_report(config: config_loader.AppConfig, conn: sqlite3.Connection) -> P
     return path
 
 
+def generate_report(config: config_loader.AppConfig) -> Path:
+    """按配置与库内数据生成报告，返回写出的路径。"""
+    if not config.paths.database.is_file():
+        raise config_loader.ConfigError(
+            f"还没有数据库：{config.paths.database}；"
+            "请先运行 python3 hub.py init-db --demo 与 python3 hub.py import-scores --demo。"
+        )
+
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        return write_report(config, conn)
+    finally:
+        conn.close()
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="生成 Phase 1 演示报告")
+    """兼容垫片：等价于 `python3 hub.py make-report`。"""
+    parser = argparse.ArgumentParser(description="生成演示报告（兼容 Phase 1 调用方式）")
     parser.add_argument("--config", default=None, help="配置文件；省略时自动找")
+    parser.add_argument("--db", default=None, help="覆盖数据库路径")
     args = parser.parse_args(argv)
 
-    try:
-        config = config_loader.load_config(
-            config_loader.resolve_cli_config_path(args.config)
-        )
-        if not config.paths.database.is_file():
-            raise config_loader.ConfigError(
-                f"还没有数据库：{config.paths.database}；"
-                "请先运行 python3 init_db.py --demo 与 python3 import_scores.py。"
-            )
+    import hub
 
-        conn = db_module.connect(config.paths.database)
-        try:
-            db_module.require_schema(conn)
-            path = write_report(config, conn)
-        finally:
-            conn.close()
-    except config_loader.ConfigError as exc:
-        print(f"[错误] {exc}", file=sys.stderr)
-        return 2
-
-    print(f"已生成报告：{path}")
-    print("提示：报告是 Markdown，可用任意编辑器或浏览器打开；数据不出本机。")
-    return 0
+    forwarded: list[str] = []
+    if args.config:
+        forwarded += ["--config", args.config]
+    if args.db:
+        forwarded += ["--db", args.db]
+    forwarded += ["make-report"]
+    return hub.main(forwarded)
 
 
 if __name__ == "__main__":

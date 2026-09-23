@@ -15,6 +15,7 @@
 | 隐私扫描 | `scripts/privacy_scan.sh` | 已搬运 | 2026-09-21 | 私有词表走本地文件，不随仓库分发 |
 | Phase 1 最小闭环（建库 / 导入 / 报告） | `init_db.py`、`import_scores.py`、`make_report.py`、`schema/phase1_schema.sql` | 已搬运 | 2026-09-23 | **临时 schema**（`phase1-temp`），Phase 2 会替换或扩展；成绩导入只吃虚构演示数据集，正式导入器留给 Phase 2 |
 | 正式 schema 与数据层（Phase 2 地基） | `schema/*.sql`、`db.py`、`init_db.py` | 已搬运 | 2026-09-23 | 按模块拆六个建表文件 + 独立的 `schema_migrations` 记录表；连接统一走 `db.py`（外键默认开）；Phase 1 临时库不自动迁移，走 `--rebuild --yes` 显式重建 |
+| 统一 CLI 入口 | `hub.py` + 三个兼容垫片 | 已搬运 | 2026-09-23 | 上游是多个独立脚本 + 全局 `--db`；这里做成薄分发子命令，旧三脚本保留为垫片；此后只加子命令不加脚本 |
 | 成绩导入 | — | 未开始 | — | Phase 2 搬正式导入器（多格式、真实成绩表） |
 | 作业与订正 | — | 未开始 | — | — |
 | 错因与行为记录 | — | 未开始 | — | — |
