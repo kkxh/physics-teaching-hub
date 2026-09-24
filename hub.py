@@ -31,6 +31,7 @@ import import_scores
 import init_db
 import make_report
 import profiling
+import reports
 
 
 def add_global_options(
@@ -206,6 +207,28 @@ def build_parser() -> argparse.ArgumentParser:
     add_global_options(follow_up_parser, suppress_defaults=True)
     follow_up_parser.add_argument("--alert", dest="alert_id", type=int, default=None)
     follow_up_parser.add_argument("--student", dest="student_uid", default=None)
+
+    weekly_parser = subparsers.add_parser(
+        "weekly-report",
+        help="生成某一周的周报（默认上一周）",
+        description=(
+            "汇总某一教学周的考试、作业、错因、行为与预警，输出 Markdown 到 outputs/。"
+            "默认上一周；--week 用 YYYY-Www 指定，周必须落在学期内。"
+        ),
+    )
+    add_global_options(weekly_parser, suppress_defaults=True)
+    weekly_parser.add_argument("--week", default=None, help="如 2026-W42；默认上一周")
+    weekly_parser.add_argument("--class", dest="class_name", default=None, help="只看某个班")
+
+    patrol_parser = subparsers.add_parser(
+        "phase-patrol",
+        help="生成阶段巡检报告（当前进度 / 作业覆盖 / 预警 / 提醒）",
+        description=(
+            "按当前日期生成阶段巡检：教学周进度、当前教学阶段、作业覆盖、画像平均分、"
+            "预警未解决数与异常提醒，输出 Markdown 到 outputs/。"
+        ),
+    )
+    add_global_options(patrol_parser, suppress_defaults=True)
 
     return parser
 
@@ -592,6 +615,30 @@ def run_list_follow_ups(config: config_loader.AppConfig, args: argparse.Namespac
     return 0
 
 
+def run_weekly_report(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        path = reports.write_weekly_report(
+            config, conn, week_label=args.week, class_name=args.class_name
+        )
+    finally:
+        conn.close()
+    print(f"已生成周报：{path}")
+    return 0
+
+
+def run_phase_patrol(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        path = reports.write_phase_patrol(config, conn)
+    finally:
+        conn.close()
+    print(f"已生成阶段巡检：{path}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -632,6 +679,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_alert_stats(config, args)
         if args.command == "list-follow-ups":
             return run_list_follow_ups(config, args)
+        if args.command == "weekly-report":
+            return run_weekly_report(config, args)
+        if args.command == "phase-patrol":
+            return run_phase_patrol(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
