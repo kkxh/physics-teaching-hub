@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 CREATE INDEX IF NOT EXISTS idx_alerts_student ON alerts(student_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+-- 扫描时按（学生, 规则, 状态）找未解决预警
+CREATE INDEX IF NOT EXISTS idx_alerts_student_kind ON alerts(student_id, kind, status);
 
 CREATE TABLE IF NOT EXISTS follow_ups (
     id          INTEGER PRIMARY KEY,

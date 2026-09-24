@@ -10,6 +10,8 @@
 约定：
 
 - 扫描**幂等**：同一学生在同一规则上已有一条未解决预警时只刷新内容，不重复新建；
+  已解决的条目在条件（severity / 说明）没变化时也不再重新开，避免「解决 → 又出现」的循环；
+  条件升级时会重新开一条新的未解决预警；
 - 条件消失**不会自动关闭**预警——关闭必须走 `resolve_alert` 并留下跟进记录，
   不允许「静默解决」（`follow_ups` 里必须有人、时间和说明）。
 """
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 import config_loader
@@ -43,6 +46,11 @@ class AlertCandidate:
 def _severity(level: float, threshold: float) -> str:
     """达到 2 倍阈值算 critical，否则 warning。"""
     return "critical" if threshold > 0 and level >= threshold * 2 else "warning"
+
+
+def _low_average_severity(average: float, threshold: float) -> str:
+    """平均分低于阈值的 80% 算 critical。"""
+    return "critical" if threshold > 0 and average < threshold * 0.8 else "warning"
 
 
 def detect_alerts(
@@ -140,11 +148,8 @@ def detect_alerts(
                 candidates.append(
                     AlertCandidate(
                         **identity,
-                        kind=LOW_AVERAGE_KIND,
-                        severity=_severity(
-                            rules.low_average_threshold - average,
-                            rules.low_average_threshold,
-                        ),
+                    kind=LOW_AVERAGE_KIND,
+                        severity=_low_average_severity(average, rules.low_average_threshold),
                         description=(
                             f"考试成绩平均分 {average:.1f}，低于阈值 "
                             f"{rules.low_average_threshold:g}"
@@ -191,6 +196,17 @@ def scan_alerts(
         open_by_key = {
             (int(row["student_id"]), str(row["kind"])): row for row in open_rows
         }
+        # 已解决的预警：同一条（学生, 规则）且内容没变化时不再重新开一条，
+        # 否则老师会陷入「解决 → 下次扫描又出现」的循环；只有条件升级才重新开。
+        resolved_by_key: dict[tuple[int, str], sqlite3.Row] = {}
+        for row in conn.execute(
+            """
+            SELECT id, student_id, kind, severity, description
+            FROM alerts WHERE status = ? ORDER BY id
+            """,
+            (RESOLVED,),
+        ):
+            resolved_by_key[(int(row["student_id"]), str(row["kind"]))] = row
         student_ids = {
             str(row["student_uid"]): int(row["id"])
             for row in conn.execute("SELECT id, student_uid FROM students")
@@ -198,12 +214,21 @@ def scan_alerts(
 
         created = 0
         updated = 0
+        skipped_resolved = 0
         if not dry_run:
             with conn:
                 for candidate in candidates:
                     student_id = student_ids[candidate.student_uid]
                     existing = open_by_key.get((student_id, candidate.kind))
                     if existing is None:
+                        resolved = resolved_by_key.get((student_id, candidate.kind))
+                        if (
+                            resolved is not None
+                            and str(resolved["severity"]) == candidate.severity
+                            and str(resolved["description"]) == candidate.description
+                        ):
+                            skipped_resolved += 1
+                            continue
                         conn.execute(
                             """
                             INSERT INTO alerts
@@ -245,6 +270,7 @@ def scan_alerts(
             "candidates": candidates,
             "created": created,
             "updated": updated,
+            "skipped_resolved": skipped_resolved,
             "stale": len(stale),
             "open_total": len(open_by_key) + (0 if dry_run else created),
         }
@@ -302,8 +328,6 @@ def resolve_alert(
         if str(row["status"]) == RESOLVED:
             raise config_loader.ConfigError(f"预警 id={alert_id} 已经解决过了。")
 
-        from datetime import datetime, timezone
-
         stamp = resolved_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with conn:
             conn.execute(
@@ -344,6 +368,49 @@ def alert_stats(conn: sqlite3.Connection) -> dict[str, Any]:
         "open_by_severity": by_severity,
         "follow_ups": int(follow_ups),
     }
+
+
+def list_follow_ups(
+    conn: sqlite3.Connection,
+    *,
+    alert_id: int | None = None,
+    student_uid: str | None = None,
+) -> list[sqlite3.Row]:
+    """列出跟进记录（可按预警 id 或学生过滤），按记录时间倒序。"""
+    sql = """
+        SELECT f.id, f.alert_id, a.kind, a.status AS alert_status,
+               s.student_uid, s.name AS student_name,
+               f.note, f.outcome, f.recorded_by, f.created_at
+        FROM follow_ups f
+        JOIN alerts a ON a.id = f.alert_id
+        JOIN students s ON s.id = a.student_id
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+    if alert_id is not None:
+        conditions.append("f.alert_id = ?")
+        params.append(alert_id)
+    if student_uid:
+        conditions.append("s.student_uid = ?")
+        params.append(student_uid)
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY f.created_at DESC, f.id DESC"
+    return list(conn.execute(sql, params).fetchall())
+
+
+def format_follow_up_table(rows: Sequence[sqlite3.Row]) -> str:
+    lines = [
+        "| 预警 id | 学生 | 规则 | 跟进说明 | 结果 | 跟进人 | 记录时间(UTC) |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            f"| {row['alert_id']} | {row['student_name']}（{row['student_uid']}） | "
+            f"{row['kind']} | {row['note']} | {row['outcome'] or '—'} | "
+            f"{row['recorded_by'] or '—'} | {row['created_at']} |"
+        )
+    return "\n".join(lines)
 
 
 def format_alert_table(rows: Sequence[sqlite3.Row]) -> str:

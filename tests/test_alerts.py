@@ -214,6 +214,16 @@ class RuleTests(AlertTestCase):
         self.assertEqual(len(result["candidates"]), 3)
         self.assertEqual(self.query("SELECT COUNT(*) AS n FROM alerts")[0]["n"], 0)
 
+    def test_low_average_becomes_critical_below_80_percent_of_threshold(self):
+        # 学生03 的成绩改成远低于阈值（60 的 80% = 48）
+        self.execute("UPDATE exam_scores SET score = 20 WHERE student_id = 3")
+
+        self.scan()
+
+        rows = self.alerts_by_student()["高一(A)班-03"]
+        self.assertEqual([row["kind"] for row in rows], ["low_average"])
+        self.assertEqual(rows[0]["severity"], "critical")
+
 
 class FollowUpTests(AlertTestCase):
     def test_resolve_writes_a_follow_up_in_the_same_transaction(self):
@@ -285,6 +295,72 @@ class FollowUpTests(AlertTestCase):
             self.query("SELECT status FROM alerts WHERE student_id = 1")[0]["status"], "open"
         )
         self.assertEqual(self.query("SELECT COUNT(*) AS n FROM follow_ups")[0]["n"], 0)
+
+    def test_resolved_alert_is_not_recreated_while_condition_is_unchanged(self):
+        self.scan()
+        alert_id = int(self.alerts_by_student()["高一(A)班-01"][0]["id"])
+        alerts_module.resolve_alert(self.config, alert_id=alert_id, note="已沟通，家长会跟进")
+
+        result = self.scan()
+
+        self.assertEqual(result["created"], 0)
+        self.assertEqual(result["skipped_resolved"], 1)
+        self.assertEqual(
+            self.query("SELECT COUNT(*) AS n FROM alerts WHERE student_id = 1")[0]["n"], 1
+        )
+
+    def test_escalated_condition_opens_a_new_alert(self):
+        self.scan()
+        alert_id = int(self.alerts_by_student()["高一(A)班-02"][0]["id"])
+        alerts_module.resolve_alert(self.config, alert_id=alert_id, note="已面谈")
+        # 条件升级：平均分进一步下滑到阈值 80% 以下（critical）
+        self.execute("UPDATE exam_scores SET score = 20 WHERE student_id = 2")
+
+        result = self.scan()
+
+        self.assertEqual(result["created"], 1)
+        rows = self.query(
+            "SELECT status, severity FROM alerts WHERE student_id = 2 ORDER BY id"
+        )
+        self.assertEqual([row["status"] for row in rows], ["resolved", "open"])
+        self.assertEqual(rows[1]["severity"], "critical")
+
+    def test_follow_ups_can_be_listed_and_filtered(self):
+        self.scan()
+        alert_id = int(self.alerts_by_student()["高一(A)班-01"][0]["id"])
+        alerts_module.resolve_alert(
+            self.config, alert_id=alert_id, note="已沟通", outcome="补交", recorded_by="演示教师"
+        )
+
+        conn = sqlite3.connect(self.config.paths.database)
+        conn.row_factory = sqlite3.Row
+        try:
+            by_alert = alerts_module.list_follow_ups(conn, alert_id=alert_id)
+            by_student = alerts_module.list_follow_ups(conn, student_uid="高一(A)班-01")
+            other_student = alerts_module.list_follow_ups(conn, student_uid="高一(A)班-02")
+        finally:
+            conn.close()
+
+        self.assertEqual(len(by_alert), 1)
+        self.assertEqual(len(by_student), 1)
+        self.assertEqual(other_student, [])
+        self.assertEqual(by_alert[0]["note"], "已沟通")
+        self.assertEqual(by_alert[0]["outcome"], "补交")
+
+    def test_cli_lists_follow_ups(self):
+        self.scan()
+        alert_id = int(self.alerts_by_student()["高一(A)班-03"][0]["id"])
+        alerts_module.resolve_alert(self.config, alert_id=alert_id, note="已讲评")
+        out = io.StringIO()
+
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = hub.main(
+                ["--config", str(self.config_path), "list-follow-ups", "--alert", str(alert_id)]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertIn("跟进说明", out.getvalue())
+        self.assertIn("已讲评", out.getvalue())
 
     def test_list_and_stats(self):
         self.scan()

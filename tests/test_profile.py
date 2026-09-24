@@ -109,6 +109,42 @@ class PureFunctionTests(unittest.TestCase):
 
         self.assertNotIn("sqlite3.connect(", source)
 
+    def test_dimension_without_data_is_not_computed(self):
+        no_homework = profiling.StudentProfileInput(
+            student_uid="高一(A)班-01",
+            exam_scores=(profiling.ExamScoreInput(75, 100),),
+        )
+
+        dimensions = profiling.compute_dimensions(no_homework)
+
+        self.assertNotIn("homework_habit", dimensions)
+        self.assertIn("score_level", dimensions)
+
+    def test_overall_uses_only_dimensions_with_data(self):
+        data = profiling.StudentProfileInput(
+            student_uid="高一(A)班-01",
+            exam_scores=(profiling.ExamScoreInput(70, 100),),
+        )
+
+        profile = profiling.compute_profile(data, {"score_level": 0.5, "homework_habit": 0.5, "error_control": 0.0})
+
+        # 只有 score_level 有数据 → 综合分等于它，而不是被「没数据的作业」拉低
+        self.assertEqual(profile["overall"], 70.0)
+
+    def test_student_without_any_data_gets_only_overall(self):
+        empty = profiling.StudentProfileInput(student_uid="高一(A)班-09")
+
+        profile = profiling.compute_profile(empty)
+
+        self.assertEqual(profile, {"overall": 0.0})
+
+    def test_table_shows_dash_for_missing_dimension(self):
+        table = profiling.format_profile_table(
+            {"高一(A)班-01": {"score_level": 70.0, "overall": 70.0}}
+        )
+
+        self.assertIn("| 高一(A)班-01 | 70.0 | — | — | 70.0 |", table)
+
 
 class ProfileIntegrationTests(unittest.TestCase):
     def setUp(self):

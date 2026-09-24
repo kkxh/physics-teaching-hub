@@ -162,6 +162,7 @@ class SchemaFileTests(unittest.TestCase):
             "idx_exam_scores_student",
             "idx_assignments_class",
             "idx_error_records_assignment",
+            "idx_alerts_student_kind",
         ):
             with self.subTest(index=expected):
                 self.assertIn(expected, names)

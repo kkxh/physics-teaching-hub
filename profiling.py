@@ -85,12 +85,30 @@ def error_control(error_count: int, work_count: int) -> float:
     return _clamp(100.0 - ERROR_PENALTY_PER_RECORD * (error_count / units))
 
 
+def available_dimensions(data: StudentProfileInput) -> tuple[str, ...]:
+    """哪些维度**有数据**。没有数据的维度不落库、也不参与综合分——
+    「还没有作业」不等于「作业习惯 0 分」。"""
+    names: list[str] = []
+    if data.exam_scores:
+        names.append("score_level")
+    if data.homework:
+        names.append("homework_habit")
+    if data.work_count or data.error_count:
+        names.append("error_control")
+    return tuple(names)
+
+
 def compute_dimensions(data: StudentProfileInput) -> dict[str, float]:
-    """纯函数：输入数据 → 三个维度分（0~100）。"""
-    return {
+    """纯函数：输入数据 → 有数据的维度分（0~100）。"""
+    all_dimensions = {
         "score_level": score_level(data.exam_scores),
         "homework_habit": homework_habit(data.homework),
         "error_control": error_control(data.error_count, data.work_count),
+    }
+    return {
+        name: all_dimensions[name]
+        for name in all_dimensions
+        if name in available_dimensions(data)
     }
 
 
@@ -100,6 +118,8 @@ def compute_profile(
 ) -> dict[str, float]:
     """纯函数：输入数据 → 三个维度分 + 综合分。"""
     dimensions = compute_dimensions(data)
+    if not dimensions:
+        return {"overall": 0.0}
     effective = dict(weights or config_loader.DEFAULT_PROFILE_WEIGHTS)
     total_weight = sum(max(0.0, effective.get(name, 0.0)) for name in dimensions)
     if total_weight <= 0:
@@ -219,6 +239,16 @@ def save_profiles(
                     (student_id, dimension, float(value), computed_at),
                 )
                 written += 1
+
+            # 之前算过、这次没有数据的维度要删掉，避免留下误导性的 0 分
+            placeholders = ", ".join("?" for _ in dimensions)
+            conn.execute(
+                f"""
+                DELETE FROM ability_scores
+                WHERE student_id = ? AND dimension NOT IN ({placeholders})
+                """,
+                (student_id, *dimensions),
+            )
     return written
 
 
@@ -265,9 +295,12 @@ def format_profile_table(profiles: Mapping[str, Mapping[str, float]]) -> str:
         "| --- | --- | --- | --- | --- |",
     ]
     for student_uid, dimensions in sorted(profiles.items()):
+        def cell(name: str) -> str:
+            value = dimensions.get(name)
+            return "—" if value is None else f"{value:.1f}"
+
         lines.append(
-            f"| {student_uid} | {dimensions['score_level']:.1f} | "
-            f"{dimensions['homework_habit']:.1f} | {dimensions['error_control']:.1f} | "
-            f"{dimensions['overall']:.1f} |"
+            f"| {student_uid} | {cell('score_level')} | {cell('homework_habit')} | "
+            f"{cell('error_control')} | {cell('overall')} |"
         )
     return "\n".join(lines)

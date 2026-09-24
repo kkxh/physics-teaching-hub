@@ -200,6 +200,13 @@ def build_parser() -> argparse.ArgumentParser:
     alert_stats_parser = subparsers.add_parser("alert-stats", help="预警统计")
     add_global_options(alert_stats_parser, suppress_defaults=True)
 
+    follow_up_parser = subparsers.add_parser(
+        "list-follow-ups", help="列出跟进记录（可按预警或学生过滤）"
+    )
+    add_global_options(follow_up_parser, suppress_defaults=True)
+    follow_up_parser.add_argument("--alert", dest="alert_id", type=int, default=None)
+    follow_up_parser.add_argument("--student", dest="student_uid", default=None)
+
     return parser
 
 
@@ -568,6 +575,23 @@ def run_alert_stats(config: config_loader.AppConfig, args: argparse.Namespace) -
     return 0
 
 
+def run_list_follow_ups(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        rows = alerts_module.list_follow_ups(
+            conn, alert_id=args.alert_id, student_uid=args.student_uid
+        )
+    finally:
+        conn.close()
+
+    if not rows:
+        print("没有符合条件的跟进记录。")
+        return 0
+    print(alerts_module.format_follow_up_table(rows))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -606,6 +630,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_resolve_alert(config, args)
         if args.command == "alert-stats":
             return run_alert_stats(config, args)
+        if args.command == "list-follow-ups":
+            return run_list_follow_ups(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
