@@ -23,6 +23,7 @@ from typing import Any, Mapping
 
 import config_loader
 import db as db_module
+import homework as homework_module
 import seed_demo_data
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schema"
@@ -218,6 +219,7 @@ def init_database(
         apply_schema(conn)
         applied_migrations = apply_migrations(conn)
         counts = import_roster(conn, dataset)
+        homework_counts = homework_module.import_demo_homework(conn, dataset)
     finally:
         conn.close()
 
@@ -226,6 +228,7 @@ def init_database(
         "schema_version": SCHEMA_VERSION,
         "classes": counts["classes"],
         "students": counts["students"],
+        "homework": homework_counts,
         "dataset": config.demo.output,
         "migrations": applied_migrations,
         "removed": removed,

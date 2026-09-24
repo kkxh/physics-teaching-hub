@@ -180,10 +180,18 @@ class DatasetTests(unittest.TestCase):
 
                 homework_days = []
                 for item in dataset["homework"]:
-                    day = date.fromisoformat(item["date"])
+                    day = date.fromisoformat(item["assigned_date"])
                     self.assertGreaterEqual(day, config.semester.starts_on)
                     self.assertLessEqual(day, config.semester.ends_on)
                     homework_days.append(day)
+                    due = date.fromisoformat(item["due_date"])
+                    self.assertGreaterEqual(due, config.semester.starts_on)
+                    self.assertLessEqual(due, config.semester.ends_on)
+                    for record in item["records"]:
+                        if record.get("submitted_on"):
+                            submitted = date.fromisoformat(record["submitted_on"])
+                            self.assertGreaterEqual(submitted, config.semester.starts_on)
+                            self.assertLessEqual(submitted, config.semester.ends_on)
                 self.assertEqual(homework_days, sorted(homework_days))
 
     def test_configured_exams_change_names_dates_and_full_score(self):

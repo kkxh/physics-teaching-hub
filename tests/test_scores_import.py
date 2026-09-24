@@ -147,7 +147,8 @@ class CsvShapeTests(ImportTestCase):
             self.import_csv("学号,分数\n高一(A)班-01,90\n")
 
         message = str(ctx.exception)
-        self.assertIn("缺少分数列", message)
+        self.assertIn("缺少这些列", message)
+        self.assertIn("score", message)
         self.assertIn("--columns", message)
 
     def test_columns_mapping_allows_custom_headers(self):

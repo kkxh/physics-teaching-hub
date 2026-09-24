@@ -31,9 +31,12 @@ from typing import Any, Mapping
 
 import config_loader
 
-DATASET_VERSION = "demo.v2"
+DATASET_VERSION = "demo.v4"
 
 ERROR_TAGS = ("模型选择", "图像读取", "计算失误", "表达不规范", "概念混淆")
+
+# 作业提交状态：与 schema/homework.sql 的 CHECK 约束一致
+HOMEWORK_STATUSES = ("submitted", "late", "missing")
 
 
 def fictional_name_pattern(prefix: str) -> re.Pattern[str]:
@@ -127,29 +130,40 @@ def build_dataset(config: config_loader.AppConfig) -> dict[str, Any]:
         )
 
     topics = config.demo.homework_topics
+    starts_on = config.semester.starts_on
+    ends_on = config.semester.ends_on
     homework: list[dict[str, Any]] = []
     for index, topic in enumerate(topics):
         class_name = config.class_names[index % len(config.class_names)]
+        assigned_on = date_at_progress(starts_on, ends_on, (index + 1) / (len(topics) + 1))
+        due_on = min(assigned_on + timedelta(days=2), ends_on)
         records = []
         for _cls, student_id in roster:
             if not student_id.startswith(class_name):
                 continue
             status = rng.choices(
-                ("submitted", "late", "missing"), weights=(82, 12, 6), k=1
+                HOMEWORK_STATUSES, weights=(82, 12, 6), k=1
             )[0]
             record: dict[str, Any] = {"student_id": student_id, "status": status}
-            if status == "submitted" and rng.random() < 0.45:
-                record["error_tags"] = rng.sample(ERROR_TAGS, k=rng.randint(1, 2))
+            if status in ("submitted", "late"):
+                handed_in = min(
+                    assigned_on + timedelta(days=1 if status == "submitted" else 3),
+                    ends_on,
+                )
+                record["submitted_on"] = handed_in.isoformat()
+                if rng.random() < 0.45:
+                    record["correction"] = {
+                        "corrected_on": min(handed_in + timedelta(days=2), ends_on).isoformat(),
+                        "note": f"{labels.get('terms.correction')}记录：{rng.choice(ERROR_TAGS)}",
+                    }
             records.append(record)
         homework.append(
             {
-                "date": date_at_progress(
-                    config.semester.starts_on,
-                    config.semester.ends_on,
-                    (index + 1) / (len(topics) + 1),
-                ).isoformat(),
+                "assign_key": f"demo-hw-{index + 1:02d}",
                 "class": class_name,
                 "topic": f"{homework_prefix}：{topic}",
+                "assigned_date": assigned_on.isoformat(),
+                "due_date": due_on.isoformat(),
                 "records": records,
             }
         )
@@ -213,10 +227,47 @@ def check_dataset(
             _date_problems(exam.get("date"), semester, f"{exam.get('name')} 的日期")
         )
 
+    seen_assign_keys: set[str] = set()
     for item in dataset.get("homework") or []:
+        label = f"作业 {item.get('assign_key') or item.get('topic') or '（无标识）'}"
+        assign_key = str(item.get("assign_key") or "")
+        if not assign_key:
+            problems.append(f"{label} 缺少 assign_key")
+        elif assign_key in seen_assign_keys:
+            problems.append(f"作业标识重复：{assign_key}")
+        else:
+            seen_assign_keys.add(assign_key)
+
+        if str(item.get("class") or "") not in config.class_names:
+            problems.append(f"{label} 的班级不在配置里：{item.get('class')!r}")
+        if not str(item.get("topic") or "").strip():
+            problems.append(f"{label} 缺少主题")
+
         problems.extend(
-            _date_problems(item.get("date"), semester, f"{item.get('class')} 的作业日期")
+            _date_problems(item.get("assigned_date"), semester, f"{label} 的布置日期")
         )
+        problems.extend(_date_problems(item.get("due_date"), semester, f"{label} 的截止日期"))
+        if (
+            item.get("assigned_date")
+            and item.get("due_date")
+            and str(item["due_date"]) < str(item["assigned_date"])
+        ):
+            problems.append(f"{label} 的截止日期早于布置日期")
+
+        for record in item.get("records") or []:
+            status = record.get("status")
+            if status not in HOMEWORK_STATUSES:
+                problems.append(f"{label} 里有非法状态：{status!r}")
+            if record.get("submitted_on"):
+                problems.extend(
+                    _date_problems(record["submitted_on"], semester, f"{label} 的提交日期")
+                )
+            correction = record.get("correction")
+            if correction:
+                if status not in ("submitted", "late"):
+                    problems.append(f"{label} 里未交的记录不该有订正")
+                elif not correction.get("corrected_on"):
+                    problems.append(f"{label} 的订正缺少 corrected_on")
 
     if build_dataset(config) != dataset:
         problems.append("数据集不可复现：同一份配置生成了不同结果")

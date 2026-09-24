@@ -80,7 +80,7 @@ def find_students_by_name(conn: sqlite3.Connection, name: str) -> list[sqlite3.R
     """按姓名找学生：先精确（忽略空格），再模糊。返回全部匹配行，不截断。"""
     cleaned = name.strip()
     base_sql = """
-        SELECT s.id, s.student_uid, s.name, c.name AS class_name
+        SELECT s.id, s.student_uid, s.name, s.class_id, c.name AS class_name
         FROM students s
         JOIN classes c ON c.id = s.class_id
     """
@@ -117,7 +117,7 @@ def resolve_student(
     if student_uid:
         row = conn.execute(
             """
-            SELECT s.id, s.student_uid, s.name, c.name AS class_name
+            SELECT s.id, s.student_uid, s.name, s.class_id, c.name AS class_name
             FROM students s
             JOIN classes c ON c.id = s.class_id
             WHERE s.student_uid = ?
@@ -182,9 +182,12 @@ def resolve_exam(
     return row, exam_key, False
 
 
-def parse_columns(spec: str | None) -> dict[str, str]:
+def parse_columns(
+    spec: str | None,
+    defaults: Mapping[str, str] = DEFAULT_COLUMNS,
+) -> dict[str, str]:
     """把 `--columns "表头=字段,表头2=字段2"` 解析成 内部字段 → 表头。"""
-    columns = dict(DEFAULT_COLUMNS)
+    columns = dict(defaults)
     if not spec:
         return columns
 
@@ -198,9 +201,9 @@ def parse_columns(spec: str | None) -> dict[str, str]:
             )
         header, _, field_name = piece.partition("=")
         header, field_name = header.strip(), field_name.strip()
-        if field_name not in DEFAULT_COLUMNS:
+        if field_name not in defaults:
             raise config_loader.ConfigError(
-                f"--columns 里的字段名只能是 {'、'.join(DEFAULT_COLUMNS)}；收到：{field_name!r}"
+                f"--columns 里的字段名只能是 {'、'.join(defaults)}；收到：{field_name!r}"
             )
         columns[field_name] = header
     return columns
@@ -221,27 +224,47 @@ def parse_score(raw: Any, row_number: int) -> float:
     return score
 
 
-def _check_columns(
+def resolve_columns(
     headers: Sequence[str],
     columns: Mapping[str, str],
     source: str,
+    *,
+    required: Sequence[str],
+    require_student: bool = True,
 ) -> dict[str, str]:
-    """确认表头里有分数列，以及 student_uid / name 至少一列；返回实际存在的列。"""
+    """确认表头里有必需列与（可选的）学生标识列；返回实际存在的列。"""
     present = {field: header for field, header in columns.items() if header in headers}
     shown = "、".join(headers) or "（空）"
 
-    if "score" not in present:
+    missing = [columns[field] for field in required if field not in present]
+    if missing:
         raise config_loader.ConfigError(
-            f"{source} 缺少分数列：{columns['score']!r}；"
+            f"{source} 缺少这些列：{'、'.join(missing)}；"
             f"实际表头是：{shown}。可用 --columns 映射表头。"
         )
-    if "student_uid" not in present and "name" not in present:
+    if require_student and "student_uid" not in present and "name" not in present:
         raise config_loader.ConfigError(
             f"{source} 里找不到学生标识列：至少要有一列 "
             f"{columns['student_uid']!r}（学号）或 {columns['name']!r}（姓名）；"
             f"实际表头是：{shown}。可用 --columns 映射表头。"
         )
     return present
+
+
+def field_value(
+    raw: Mapping[str, Any],
+    present: Mapping[str, str],
+    field: str,
+) -> str | None:
+    """从一行原始数据里取某个内部字段的值；列不存在或值为空都返回 None。"""
+    header = present.get(field)
+    if header is None:
+        return None
+    value = raw.get(header)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def parse_rows(
@@ -252,16 +275,7 @@ def parse_rows(
     columns: Mapping[str, str],
 ) -> list[ScoreRow]:
     """把「表头 + 逐行取值」解析成 ScoreRow；CSV 与 Excel 共用这一套。"""
-    present = _check_columns(headers, columns, source)
-
-    def cell(raw: Mapping[str, Any], field: str) -> str | None:
-        header = present.get(field)
-        if header is None:
-            return None
-        value = raw.get(header)
-        if value is None:
-            return None
-        return str(value).strip() or None
+    present = resolve_columns(headers, columns, source, required=("score",))
 
     rows: list[ScoreRow] = []
     for row_number, raw in records:
@@ -269,8 +283,8 @@ def parse_rows(
         rows.append(
             ScoreRow(
                 row_number=row_number,
-                student_uid=cell(raw, "student_uid"),
-                name=cell(raw, "name"),
+                student_uid=field_value(raw, present, "student_uid"),
+                name=field_value(raw, present, "name"),
                 score=score,
             )
         )

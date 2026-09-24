@@ -64,6 +64,11 @@ exam_review = "升学复习"
 [terms]
 semester = "学期"
 teaching_week = "教学周"
+homework = "作业"
+correction = "订正"
+error_tag = "错因"
+student = "学生"
+class = "班级"
 
 [demo]
 notice = "这份演示数据全部虚构。"
@@ -77,6 +82,7 @@ SCANNED_MODULES = (
     "config_loader.py",
     "db.py",
     "hub.py",
+    "homework.py",
     "importer.py",
     "import_scores.py",
     "init_db.py",

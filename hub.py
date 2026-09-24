@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 
 import config_loader
+import db as db_module
+import homework as homework_module
 import importer
 import import_scores
 import init_db
@@ -81,6 +83,35 @@ def build_parser() -> argparse.ArgumentParser:
 
     report_parser = subparsers.add_parser("make-report", help="生成 Markdown 报告")
     add_global_options(report_parser, suppress_defaults=True)
+
+    homework_parser = subparsers.add_parser(
+        "import-homework", help="导入一次作业的提交情况（CSV）"
+    )
+    add_global_options(homework_parser, suppress_defaults=True)
+    homework_parser.add_argument("--csv", required=True, help="作业提交表（CSV，带表头）")
+    homework_parser.add_argument("--assign-key", required=True, help="作业标识，重复导入同一份作业用它")
+    homework_parser.add_argument("--class", dest="class_name", required=True, help="作业所属班级")
+    homework_parser.add_argument("--topic", required=True, help="作业主题")
+    homework_parser.add_argument("--assigned-date", required=True, help="布置日期 YYYY-MM-DD")
+    homework_parser.add_argument("--due-date", default=None, help="截止日期 YYYY-MM-DD")
+    homework_parser.add_argument(
+        "--columns",
+        default=None,
+        help='表头映射，如 "学号=student_uid,状态=status,订正日期=corrected_on"',
+    )
+    homework_parser.add_argument("--dry-run", action="store_true", help="只预览，不写库")
+
+    stats_parser = subparsers.add_parser(
+        "homework-stats",
+        help="按班级统计作业完成情况（完成率 = 已交/应交，分子分母都只算本班当前学生）",
+        description=(
+            "按班级统计作业完成情况。口径：完成率 = 已交 / 应交，分子与分母都只算"
+            "「作业所属班级的当前学生」——转班学生的历史提交不计入任何班级，"
+            "避免完成率超过 100%；缺交 = 应交 − 已交；订正率 = 有订正的已交记录 / 已交记录。"
+        ),
+    )
+    add_global_options(stats_parser, suppress_defaults=True)
+    stats_parser.add_argument("--class", dest="class_name", default=None, help="只看某个班")
 
     return parser
 
@@ -200,6 +231,57 @@ def run_make_report(config: config_loader.AppConfig, args: argparse.Namespace) -
     return 0
 
 
+def run_import_homework(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    result = homework_module.import_homework_from_csv(
+        config,
+        csv_path=args.csv,
+        assign_key=args.assign_key,
+        class_name=args.class_name,
+        topic=args.topic,
+        assigned_date=args.assigned_date,
+        due_date=args.due_date,
+        dry_run=args.dry_run,
+        columns_spec=args.columns,
+    )
+    plan = result["plan"]
+    for warning in plan.warnings:
+        print(f"[提醒] {warning}")
+
+    if result["dry_run"]:
+        state = "已存在" if plan.assignment_exists else "将新建"
+        corrections = sum(1 for item in plan.rows if item.has_correction)
+        print(
+            f"[dry-run] 作业：{plan.assign_key}（{plan.class_name} / {plan.topic}，{state}）；"
+            f"待写入 {plan.row_count} 条提交记录，其中 {corrections} 条带订正。"
+        )
+        print("[dry-run] 没有写入任何数据。")
+        return 0
+
+    print(
+        f"已导入作业提交：{result['submissions_written']} 条"
+        f"（作业：{plan.assign_key} {plan.class_name}，"
+        f"{'新建作业' if result['assignments_created'] else '沿用已有作业'}，"
+        f"订正 {result['corrections']} 条）"
+    )
+    return 0
+
+
+def run_homework_stats(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        stats = homework_module.homework_stats(conn, args.class_name)
+    finally:
+        conn.close()
+
+    if not stats or all(item.assignment_count == 0 for item in stats):
+        print("还没有作业数据：先跑 python3 hub.py import-homework …（演示数据可用 init-db --demo）。")
+        return 0
+
+    print(homework_module.format_stats_table(stats))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -216,6 +298,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_import_scores(config, args)
         if args.command == "make-report":
             return run_make_report(config, args)
+        if args.command == "import-homework":
+            return run_import_homework(config, args)
+        if args.command == "homework-stats":
+            return run_homework_stats(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
