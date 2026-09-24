@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import alerts as alerts_module
+import api as api_module
 import config_loader
 import db as db_module
 import errors as errors_module
@@ -263,6 +264,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_global_options(handout_parser, suppress_defaults=True)
     handout_parser.add_argument("--exam-key", required=True, help="考试标识")
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="启动本地只读 API（只绑 127.0.0.1）",
+        description=(
+            "启动本地只读 API，供看板前端与本地脚本查询：/api/meta、/api/classes、/api/exams、"
+            "/api/exam/{exam_key}/stats、/api/class/{班名}/averages、/api/homework/stats、/api/alerts。"
+            "只绑定 127.0.0.1；CORS 只回固定的本机 Origin，不用通配符；只支持 GET。"
+        ),
+    )
+    add_global_options(serve_parser, suppress_defaults=True)
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=api_module.DEFAULT_PORT,
+        help=f"端口，默认 {api_module.DEFAULT_PORT}",
+    )
 
     return parser
 
@@ -726,6 +744,11 @@ def run_make_handout(config: config_loader.AppConfig, args: argparse.Namespace) 
     return 0
 
 
+def run_serve(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    api_module.run_server(config, port=args.port)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -776,6 +799,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_exam_analysis(config, args)
         if args.command == "make-handout":
             return run_make_handout(config, args)
+        if args.command == "serve":
+            return run_serve(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2

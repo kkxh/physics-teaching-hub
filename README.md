@@ -78,7 +78,13 @@ python3 hub.py weekly-report --week 2026-W45          # 某一周的周报（默
 python3 hub.py phase-patrol                           # 阶段巡检：进度 / 覆盖 / 预警 / 提醒
 python3 hub.py exam-analysis --exam-key demo-exam-1    # 考试分析：逐题得分率/难度/区分度
 python3 hub.py make-handout --exam-key demo-exam-1     # 讲评讲义（不含试卷原题）
+python3 hub.py serve --port 8420                      # 本地只读 API（只绑 127.0.0.1）
 ```
+
+本地 API 只做只读 GET，供看板前端或本地脚本查询：
+`/api/meta`、`/api/classes`、`/api/exams`、`/api/exam/{exam_key}/stats`、
+`/api/class/{班名}/averages`、`/api/homework/stats`、`/api/alerts?status=open|resolved|all`。
+只绑定 `127.0.0.1`；CORS 只回固定的本机 Origin（含实际端口）并带 `Vary: Origin`，不使用通配符。
 
 错因标签字典内置 5 类，可在 `config.toml` 的 `[error_tags]` 里改显示名或加自己的代码。
 
