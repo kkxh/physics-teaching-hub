@@ -63,6 +63,17 @@ python3 hub.py import-scores --excel 成绩表.xlsx --sheet 成绩 --exam 十月
 
 读 `.xlsx` 需要 `openpyxl`：`python3 -m pip install -r requirements.txt`；其余功能只用标准库。
 
+记错因与行为（写入前先给预览，确认后加 `--yes`）：
+
+```bash
+python3 hub.py record-error --student 高一(A)班-01 --tag calculation --exam-key demo-exam-1 --note "计算失误"
+python3 hub.py list-errors --student 高一(A)班-01
+python3 hub.py record-behavior --student 高一(A)班-01 --kind class_participation --detail "主动讲题" --yes
+python3 hub.py homework-stats          # 作业完成率（分子分母都只算本班当前学生）
+```
+
+错因标签字典内置 5 类，可在 `config.toml` 的 `[error_tags]` 里改显示名或加自己的代码。
+
 ## 配置
 
 复制 `config.example.toml` 为 `config.toml` 后按自己的情况修改；`config.toml` 不会进入 Git。

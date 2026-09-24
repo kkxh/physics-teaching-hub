@@ -81,6 +81,7 @@ FORBIDDEN_WORDS = ("物理", "高中", "初中")
 SCANNED_MODULES = (
     "config_loader.py",
     "db.py",
+    "errors.py",
     "hub.py",
     "homework.py",
     "importer.py",

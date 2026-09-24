@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping
@@ -85,6 +85,8 @@ class AppConfig:
     demo: DemoConfig
     class_names: tuple[str, ...]
     labels: Labels
+    # 错因标签字典的扩展：代码 → 显示名（内置词典在 errors.py）
+    error_tags: Mapping[str, str] = field(default_factory=dict)
     # 相对路径的解析基准：load_config 传配置文件所在目录，直接调用 parse_config 时为当前工作目录。
     base_dir: Path = Path(".")
     # 教学阶段：配置里写了 [[phases]] 就用配置的，否则用学段 profile 的默认阶段。
@@ -209,6 +211,7 @@ def parse_config(
     semester_raw = raw.get("semester") or {}
     schedule_raw = raw.get("schedule") or {}
     demo_raw = raw.get("demo") or {}
+    error_tags_raw = raw.get("error_tags") or {}
 
     locale = str(project_raw.get("locale") or DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
     labels = _load_labels(project_raw.get("labels_dir"), base, locale)
@@ -235,6 +238,7 @@ def parse_config(
     schedule = _parse_schedule(schedule_raw, semester)
     phases = _parse_phases(raw.get("phases"), semester, stage, labels)
     demo = _parse_demo(demo_raw, base)
+    error_tags = _parse_error_tags(error_tags_raw)
 
     return AppConfig(
         project=project,
@@ -246,6 +250,7 @@ def parse_config(
         labels=labels,
         base_dir=base,
         phases=phases,
+        error_tags=error_tags,
     )
 
 
@@ -610,3 +615,22 @@ def _parse_demo_topics(raw: Any) -> tuple[str, ...]:
             raise ConfigError(f"配置项 demo.homework_topics[{index}] 不能为空。")
         topics.append(topic)
     return tuple(topics)
+
+
+def _parse_error_tags(raw: Any) -> dict[str, str]:
+    """解析 [error_tags]：代码 → 显示名；内置词典在 errors.py，这里只放扩展与覆盖。"""
+    if not isinstance(raw, Mapping):
+        raise ConfigError(
+            '配置项 error_tags 应是一张表：[error_tags] 里每行写 代码 = "显示名"。'
+        )
+
+    tags: dict[str, str] = {}
+    for code, label in raw.items():
+        key = str(code).strip()
+        text = str(label).strip()
+        if not key or any(char.isspace() for char in key):
+            raise ConfigError(f"配置项 error_tags 里的代码不合法：{code!r}；代码里不能有空格。")
+        if not text:
+            raise ConfigError(f"配置项 error_tags 里的 {key} 缺少显示名。")
+        tags[key] = text
+    return tags

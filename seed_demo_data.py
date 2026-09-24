@@ -30,10 +30,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import config_loader
+import errors as errors_module
 
-DATASET_VERSION = "demo.v4"
+DATASET_VERSION = "demo.v5"
 
-ERROR_TAGS = ("模型选择", "图像读取", "计算失误", "表达不规范", "概念混淆")
+# 错因标签的显示名统一来自 errors.py 的内置词典（单一事实来源）
+ERROR_TAGS = tuple(label for _code, label in errors_module.BUILTIN_ERROR_TAGS)
 
 # 作业提交状态：与 schema/homework.sql 的 CHECK 约束一致
 HOMEWORK_STATUSES = ("submitted", "late", "missing")
@@ -179,6 +181,41 @@ def build_dataset(config: config_loader.AppConfig) -> dict[str, Any]:
         for index, weekday in enumerate(config.schedule.weekdays)
     ]
 
+    # 错因记录：挂在第一份演示作业上（作业与考试二选一，作业先于考试入库）；
+    # 行为记录：每个学生 0~2 条
+    tag_codes = [code for code, _label in errors_module.BUILTIN_ERROR_TAGS]
+    first_assign_key = homework[0]["assign_key"] if homework else None
+    error_records: list[dict[str, Any]] = []
+    behavior_records: list[dict[str, Any]] = []
+    for index, (_class_name, student_id) in enumerate(roster):
+        # 保证小名单也能看到演示记录：每 3 个学生至少挂 1 条错因
+        if first_assign_key is not None and (index % 3 == 0 or rng.random() < 0.45):
+            error_records.append(
+                {
+                    "student_id": student_id,
+                    "assign_key": first_assign_key,
+                    "tag": rng.choice(tag_codes),
+                    "note": f"{labels.get('terms.error_tag')}记录",
+                    "recorded_at": date_at_progress(
+                        starts_on, ends_on, 0.5 + (index % 10) / 100
+                    ).isoformat(),
+                }
+            )
+        behavior_count = rng.randint(0, 2)
+        if not behavior_records and behavior_count == 0:
+            behavior_count = 1  # 至少留一条，方便演示 list-behavior
+        for _ in range(behavior_count):
+            behavior_records.append(
+                {
+                    "student_id": student_id,
+                    "kind": rng.choice(errors_module.BEHAVIOR_KINDS),
+                    "detail": "演示观测记录",
+                    "recorded_at": date_at_progress(
+                        starts_on, ends_on, 0.3 + (index % 20) / 100
+                    ).isoformat(),
+                }
+            )
+
     return {
         "version": DATASET_VERSION,
         "seed": config.demo.seed,
@@ -187,6 +224,8 @@ def build_dataset(config: config_loader.AppConfig) -> dict[str, Any]:
         "exams": exams,
         "homework": homework,
         "schedule": schedule,
+        "error_records": error_records,
+        "behavior_records": behavior_records,
     }
 
 
@@ -268,6 +307,34 @@ def check_dataset(
                     problems.append(f"{label} 里未交的记录不该有订正")
                 elif not correction.get("corrected_on"):
                     problems.append(f"{label} 的订正缺少 corrected_on")
+
+    roster_uids = set(student_ids)
+    exam_keys = {str(item.get("key") or "") for item in dataset.get("exams") or []}
+    allowed_tags = {code for code, _label in errors_module.BUILTIN_ERROR_TAGS} | set(
+        config.error_tags
+    )
+
+    for item in dataset.get("error_records") or []:
+        label = f"错因记录 {item.get('student_id')}/{item.get('tag')}"
+        if str(item.get("student_id") or "") not in roster_uids:
+            problems.append(f"{label} 的学生不在名单里")
+        if str(item.get("tag") or "") not in allowed_tags:
+            problems.append(f"{label} 的标签不认识：{item.get('tag')!r}")
+        if not item.get("exam_key") and not item.get("assign_key"):
+            problems.append(f"{label} 没有挂在考试或作业上")
+        if item.get("exam_key") and str(item["exam_key"]) not in exam_keys:
+            problems.append(f"{label} 的考试不存在：{item['exam_key']!r}")
+        if item.get("assign_key") and str(item["assign_key"]) not in seen_assign_keys:
+            problems.append(f"{label} 的作业不存在：{item['assign_key']!r}")
+        problems.extend(_date_problems(item.get("recorded_at"), semester, f"{label} 的记录日期"))
+
+    for item in dataset.get("behavior_records") or []:
+        label = f"行为记录 {item.get('student_id')}/{item.get('kind')}"
+        if str(item.get("student_id") or "") not in roster_uids:
+            problems.append(f"{label} 的学生不在名单里")
+        if str(item.get("kind") or "") not in errors_module.BEHAVIOR_KINDS:
+            problems.append(f"{label} 的行为类型不认识：{item.get('kind')!r}")
+        problems.extend(_date_problems(item.get("recorded_at"), semester, f"{label} 的记录日期"))
 
     if build_dataset(config) != dataset:
         problems.append("数据集不可复现：同一份配置生成了不同结果")

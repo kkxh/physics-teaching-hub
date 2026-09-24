@@ -23,6 +23,7 @@ from pathlib import Path
 
 import config_loader
 import db as db_module
+import errors as errors_module
 import homework as homework_module
 import importer
 import import_scores
@@ -113,6 +114,48 @@ def build_parser() -> argparse.ArgumentParser:
     add_global_options(stats_parser, suppress_defaults=True)
     stats_parser.add_argument("--class", dest="class_name", default=None, help="只看某个班")
 
+    error_parser = subparsers.add_parser(
+        "record-error",
+        help="记一条错因（先预览，加 --yes 才写入）",
+        description=(
+            "记一条错因记录。写入前会校验学生、标签与所挂的考试/作业都存在；"
+            "不带 --yes 只打印预览，不会写库。"
+        ),
+    )
+    add_global_options(error_parser, suppress_defaults=True)
+    error_parser.add_argument("--student", required=True, help="学生 student_uid")
+    error_parser.add_argument("--tag", required=True, help="错因标签代码，如 calculation")
+    error_parser.add_argument("--exam-key", default=None, help="挂在哪场考试上")
+    error_parser.add_argument("--assign-key", default=None, help="挂在哪份作业上（与 --exam-key 二选一）")
+    error_parser.add_argument("--note", default=None, help="备注")
+    error_parser.add_argument("--recorded-on", default=None, help="记录日期 YYYY-MM-DD，默认今天")
+    error_parser.add_argument("--yes", action="store_true", help="确认写入")
+
+    list_error_parser = subparsers.add_parser(
+        "list-errors", help="列出某个学生的错因记录（按时间倒序）"
+    )
+    add_global_options(list_error_parser, suppress_defaults=True)
+    list_error_parser.add_argument("--student", required=True, help="学生 student_uid")
+    list_error_parser.add_argument("--tag", default=None, help="只看某个标签代码")
+
+    behavior_parser = subparsers.add_parser(
+        "record-behavior",
+        help="记一条行为记录（先预览，加 --yes 才写入）",
+        description="行为类型见 errors.BUILTIN_BEHAVIOR_KINDS；不带 --yes 只打印预览。",
+    )
+    add_global_options(behavior_parser, suppress_defaults=True)
+    behavior_parser.add_argument("--student", required=True, help="学生 student_uid")
+    behavior_parser.add_argument("--kind", required=True, help="行为类型代码")
+    behavior_parser.add_argument("--detail", default=None, help="观测细节")
+    behavior_parser.add_argument("--recorded-on", default=None, help="记录日期 YYYY-MM-DD，默认今天")
+    behavior_parser.add_argument("--yes", action="store_true", help="确认写入")
+
+    list_behavior_parser = subparsers.add_parser(
+        "list-behavior", help="列出某个学生的行为记录（按时间倒序）"
+    )
+    add_global_options(list_behavior_parser, suppress_defaults=True)
+    list_behavior_parser.add_argument("--student", required=True, help="学生 student_uid")
+
     return parser
 
 
@@ -149,6 +192,16 @@ def run_init_db(config: config_loader.AppConfig, args: argparse.Namespace) -> in
     print(
         f"已导入演示名单：{summary['classes']} 个虚构班级 / {summary['students']} 名学生"
         f"（数据集：{summary['dataset']}）"
+    )
+    homework_counts = summary["homework"]
+    print(
+        f"已导入演示作业：{homework_counts['assignments']} 份 / "
+        f"{homework_counts['submissions']} 条提交 / {homework_counts['corrections']} 条订正"
+    )
+    error_counts = summary["errors"]
+    print(
+        f"已导入演示错因与行为：{error_counts['error_records']} 条错因 / "
+        f"{error_counts['behavior_records']} 条行为记录"
     )
     return 0
 
@@ -282,6 +335,108 @@ def run_homework_stats(config: config_loader.AppConfig, args: argparse.Namespace
     return 0
 
 
+def _today_for(config: config_loader.AppConfig) -> str:
+    import teaching_calendar
+
+    return teaching_calendar.TeachingCalendar.from_config(config).today().isoformat()
+
+
+def run_record_error(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    result = errors_module.record_error(
+        config,
+        student_uid=args.student,
+        tag_code=args.tag,
+        exam_key=args.exam_key,
+        assign_key=args.assign_key,
+        note=args.note,
+        recorded_at=args.recorded_on or _today_for(config),
+        confirmed=args.yes,
+    )
+    plan = result["plan"]
+    target = plan.exam_label or plan.assignment_label or "（未指定）"
+    summary = (
+        f"学生 {plan.student_name}（{plan.student_uid}）｜错因 {plan.tag_label}"
+        f"（{plan.tag_code}）｜关联 {target}｜记录日期 {plan.recorded_at}"
+    )
+    if plan.note:
+        summary += f"｜备注 {plan.note}"
+
+    if not result["confirmed"]:
+        print(f"[预览] {summary}")
+        print("确认后请加 --yes 才会写入（写入是单事务，失败整体回滚）。")
+        return 2
+
+    print(f"已记错因：{summary}")
+    return 0
+
+
+def run_list_errors(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        rows = errors_module.list_errors(
+            conn, student_uid=args.student, tag_code=args.tag
+        )
+    finally:
+        conn.close()
+
+    if not rows:
+        print(f"{args.student} 还没有符合条件的错因记录。")
+        return 0
+
+    print("| 记录日期 | 错因 | 关联 | 备注 |")
+    print("| --- | --- | --- | --- |")
+    for row in rows:
+        target = row.exam_label or row.assignment_label or "—"
+        print(f"| {row.recorded_at} | {row.tag_label}（{row.tag_code}） | {target} | {row.note or '—'} |")
+    return 0
+
+
+def run_record_behavior(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    result = errors_module.record_behavior(
+        config,
+        student_uid=args.student,
+        kind=args.kind,
+        detail=args.detail,
+        recorded_at=args.recorded_on or _today_for(config),
+        confirmed=args.yes,
+    )
+    plan = result["plan"]
+    summary = (
+        f"学生 {plan.student_name}（{plan.student_uid}）｜行为 {plan.kind}"
+        f"｜记录日期 {plan.recorded_at}"
+    )
+    if plan.detail:
+        summary += f"｜细节 {plan.detail}"
+
+    if not result["confirmed"]:
+        print(f"[预览] {summary}")
+        print("确认后请加 --yes 才会写入。")
+        return 2
+
+    print(f"已记行为：{summary}")
+    return 0
+
+
+def run_list_behavior(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        rows = errors_module.list_behavior(conn, student_uid=args.student)
+    finally:
+        conn.close()
+
+    if not rows:
+        print(f"{args.student} 还没有行为记录。")
+        return 0
+
+    print("| 记录日期 | 行为类型 | 细节 |")
+    print("| --- | --- | --- |")
+    for row in rows:
+        print(f"| {row['recorded_at']} | {row['kind']} | {row['detail'] or '—'} |")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -302,6 +457,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_import_homework(config, args)
         if args.command == "homework-stats":
             return run_homework_stats(config, args)
+        if args.command == "record-error":
+            return run_record_error(config, args)
+        if args.command == "list-errors":
+            return run_list_errors(config, args)
+        if args.command == "record-behavior":
+            return run_record_behavior(config, args)
+        if args.command == "list-behavior":
+            return run_list_behavior(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
