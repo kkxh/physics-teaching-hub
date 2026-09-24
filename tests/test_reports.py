@@ -20,6 +20,7 @@ import config_loader  # noqa: E402
 import hub  # noqa: E402
 import init_db  # noqa: E402
 import reports  # noqa: E402
+import teaching_calendar  # noqa: E402
 
 CONFIG_TEXT = """
 [semester]
@@ -337,6 +338,8 @@ class PhasePatrolTests(ReportTestCase):
         )
         dynamic = config_loader.load_config(config_path, env={})
         init_db.init_database(dynamic)
+        # 「今天」要按配置时区算：CI 跑在 UTC，本机 date.today() 可能差一天
+        expected_day = teaching_calendar.TeachingCalendar.from_config(dynamic).today()
         out = io.StringIO()
 
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
@@ -345,7 +348,7 @@ class PhasePatrolTests(ReportTestCase):
         self.assertEqual(code, 0)
         self.assertIn("已生成阶段巡检", out.getvalue())
         self.assertTrue(
-            (dynamic.paths.output_dir / f"phase_patrol_{today.isoformat()}.md").is_file()
+            (dynamic.paths.output_dir / f"phase_patrol_{expected_day.isoformat()}.md").is_file()
         )
 
 
