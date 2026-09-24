@@ -79,6 +79,7 @@ homework_prefix = "演示练习"
 # 这些词必须来自文案表，不能硬编码在代码里。
 FORBIDDEN_WORDS = ("物理", "高中", "初中")
 SCANNED_MODULES = (
+    "alerts.py",
     "config_loader.py",
     "db.py",
     "errors.py",

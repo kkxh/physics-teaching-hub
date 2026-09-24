@@ -95,3 +95,9 @@ periods = ["第1节", "第2节", "第7节"]
 score_level = 0.5
 homework_habit = 0.3
 error_control = 0.2
+
+[alerts]
+# 预警阈值；不写就用默认值。
+missing_homework_threshold = 2   # 连续缺交几次触发预警
+low_average_threshold = 60       # 考试成绩平均分低于多少触发
+score_drop_threshold = 10        # 最近一次比上一次低多少分触发

@@ -71,6 +71,8 @@ python3 hub.py list-errors --student 高一(A)班-01
 python3 hub.py record-behavior --student 高一(A)班-01 --kind class_participation --detail "主动讲题" --yes
 python3 hub.py homework-stats          # 作业完成率（分子分母都只算本班当前学生）
 python3 hub.py compute-profile         # 学生画像（成绩水平 / 作业习惯 / 错因控制 + 综合分）
+python3 hub.py scan-alerts             # 按 [alerts] 阈值扫描预警（幂等）
+python3 hub.py resolve-alert 1 --note "已和家长沟通"   # 解决预警并留下跟进记录
 ```
 
 错因标签字典内置 5 类，可在 `config.toml` 的 `[error_tags]` 里改显示名或加自己的代码。

@@ -85,6 +85,15 @@ class PathsConfig:
 
 
 @dataclass(frozen=True)
+class AlertRules:
+    """预警阈值（P2.5）：写在 config.toml 的 [alerts] 段，默认值够跑演示。"""
+
+    missing_homework_threshold: int = 2
+    low_average_threshold: float = 60.0
+    score_drop_threshold: float = 10.0
+
+
+@dataclass(frozen=True)
 class AppConfig:
     project: ProjectConfig
     paths: PathsConfig
@@ -97,6 +106,8 @@ class AppConfig:
     error_tags: Mapping[str, str] = field(default_factory=dict)
     # 画像维度权重（P2.4），未配置时用默认值
     profile_weights: Mapping[str, float] = field(default_factory=dict)
+    # 预警阈值（P2.5）
+    alert_rules: AlertRules = field(default_factory=AlertRules)
     # 相对路径的解析基准：load_config 传配置文件所在目录，直接调用 parse_config 时为当前工作目录。
     base_dir: Path = Path(".")
     # 教学阶段：配置里写了 [[phases]] 就用配置的，否则用学段 profile 的默认阶段。
@@ -223,6 +234,7 @@ def parse_config(
     demo_raw = raw.get("demo") or {}
     error_tags_raw = raw.get("error_tags") or {}
     profile_raw = raw.get("profile") or {}
+    alerts_raw = raw.get("alerts") or {}
 
     locale = str(project_raw.get("locale") or DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
     labels = _load_labels(project_raw.get("labels_dir"), base, locale)
@@ -251,6 +263,7 @@ def parse_config(
     demo = _parse_demo(demo_raw, base)
     error_tags = _parse_error_tags(error_tags_raw)
     profile_weights = _parse_profile_weights(profile_raw)
+    alert_rules = _parse_alert_rules(alerts_raw)
 
     return AppConfig(
         project=project,
@@ -264,6 +277,7 @@ def parse_config(
         phases=phases,
         error_tags=error_tags,
         profile_weights=profile_weights,
+        alert_rules=alert_rules,
     )
 
 
@@ -673,3 +687,47 @@ def _parse_profile_weights(raw: Any) -> dict[str, float]:
     if sum(weights.values()) <= 0:
         raise ConfigError("配置项 profile 的权重不能全是 0；至少要有一个正权重。")
     return weights
+
+
+ALERT_RULE_NAMES = (
+    "missing_homework_threshold",
+    "low_average_threshold",
+    "score_drop_threshold",
+)
+
+
+def _parse_alert_rules(raw: Any) -> AlertRules:
+    """解析 [alerts]：三个阈值，名字拼错或取负数都会报错。"""
+    if not isinstance(raw, Mapping):
+        raise ConfigError(
+            f"配置项 alerts 应是一张表：[alerts] 里写 {'、'.join(ALERT_RULE_NAMES)} = 阈值。"
+        )
+
+    values: dict[str, float] = {
+        "missing_homework_threshold": 2.0,
+        "low_average_threshold": 60.0,
+        "score_drop_threshold": 10.0,
+    }
+    for key, value in raw.items():
+        name = str(key).strip()
+        if name not in values:
+            raise ConfigError(
+                f"配置项 alerts 里有不认识的阈值：{name!r}；只能是 {'、'.join(ALERT_RULE_NAMES)}。"
+            )
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ConfigError(f"配置项 alerts.{name} 应为数字，收到：{value!r}。")
+        if value < 0:
+            raise ConfigError(f"配置项 alerts.{name} 不能是负数：{value}。")
+        values[name] = float(value)
+
+    missing = values["missing_homework_threshold"]
+    if missing != int(missing) or missing < 1:
+        raise ConfigError(
+            f"配置项 alerts.missing_homework_threshold 应为 ≥1 的整数，收到：{missing:g}。"
+        )
+
+    return AlertRules(
+        missing_homework_threshold=int(missing),
+        low_average_threshold=values["low_average_threshold"],
+        score_drop_threshold=values["score_drop_threshold"],
+    )

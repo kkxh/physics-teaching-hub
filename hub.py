@@ -21,6 +21,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import alerts as alerts_module
 import config_loader
 import db as db_module
 import errors as errors_module
@@ -169,6 +170,35 @@ def build_parser() -> argparse.ArgumentParser:
     add_global_options(profile_parser, suppress_defaults=True)
     profile_parser.add_argument("--student", default=None, help="只算这个 student_uid")
     profile_parser.add_argument("--rebuild", action="store_true", help="全部重算")
+
+    scan_parser = subparsers.add_parser(
+        "scan-alerts",
+        help="按 [alerts] 阈值扫描并写入预警（幂等）",
+        description=(
+            "按阈值扫描预警：连续缺交 / 平均分偏低 / 成绩下滑。同一学生在同一规则上只保留"
+            "一条未解决预警；条件消失不会自动关闭（要用 resolve-alert 记录跟进后关闭）。"
+        ),
+    )
+    add_global_options(scan_parser, suppress_defaults=True)
+    scan_parser.add_argument("--dry-run", action="store_true", help="只预览，不写库")
+
+    list_alerts_parser = subparsers.add_parser("list-alerts", help="列出预警")
+    add_global_options(list_alerts_parser, suppress_defaults=True)
+    list_alerts_parser.add_argument(
+        "--status", choices=("open", "resolved"), default=None, help="只看某种状态"
+    )
+
+    resolve_parser = subparsers.add_parser(
+        "resolve-alert", help="解决一条预警（必须写跟进说明）"
+    )
+    add_global_options(resolve_parser, suppress_defaults=True)
+    resolve_parser.add_argument("alert_id", type=int, help="预警 id")
+    resolve_parser.add_argument("--note", required=True, help="跟进说明（必填）")
+    resolve_parser.add_argument("--outcome", default=None, help="跟进结果")
+    resolve_parser.add_argument("--by", dest="recorded_by", default=None, help="跟进人")
+
+    alert_stats_parser = subparsers.add_parser("alert-stats", help="预警统计")
+    add_global_options(alert_stats_parser, suppress_defaults=True)
 
     return parser
 
@@ -465,6 +495,79 @@ def run_compute_profile(config: config_loader.AppConfig, args: argparse.Namespac
     return 0
 
 
+def run_scan_alerts(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    result = alerts_module.scan_alerts(config, dry_run=args.dry_run)
+    candidates = result["candidates"]
+    if not candidates:
+        print("没有命中任何预警规则。")
+    for candidate in candidates:
+        print(
+            f"[{candidate.severity}] {candidate.student_name}（{candidate.student_uid}，"
+            f"{candidate.class_name}）｜{candidate.kind}｜{candidate.description}"
+        )
+    if result["dry_run"]:
+        print(f"[dry-run] 命中 {len(candidates)} 条，没有写入任何数据。")
+        return 0
+    print(
+        f"已扫描：命中 {len(candidates)} 条（新建 {result['created']}，刷新 {result['updated']}）；"
+        f"当前未解决预警 {result['open_total']} 条。"
+    )
+    if result["stale"]:
+        print(
+            f"另有 {result['stale']} 条未解决预警的条件已经消失——不会自动关闭，"
+            "确认处理完请用 resolve-alert 写下跟进说明后关闭。"
+        )
+    return 0
+
+
+def run_list_alerts(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        rows = alerts_module.list_alerts(conn, status=args.status)
+    finally:
+        conn.close()
+
+    if not rows:
+        print("没有符合条件的预警。")
+        return 0
+    print(alerts_module.format_alert_table(rows))
+    return 0
+
+
+def run_resolve_alert(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    result = alerts_module.resolve_alert(
+        config,
+        alert_id=args.alert_id,
+        note=args.note,
+        outcome=args.outcome,
+        recorded_by=args.recorded_by,
+    )
+    print(
+        f"已解决预警 id={result['alert_id']}（resolved_at={result['resolved_at']} UTC），"
+        f"跟进说明已记录：{result['note']}"
+    )
+    return 0
+
+
+def run_alert_stats(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        stats = alerts_module.alert_stats(conn)
+    finally:
+        conn.close()
+
+    if not stats["by_status"] and not stats["follow_ups"]:
+        print("还没有预警数据：先跑 python3 hub.py scan-alerts。")
+        return 0
+    print(f"按状态：{stats['by_status'] or '（无）'}")
+    print(f"按规则：{stats['by_kind'] or '（无）'}")
+    print(f"未解决按级别：{stats['open_by_severity'] or '（无）'}")
+    print(f"跟进记录：{stats['follow_ups']} 条")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -495,6 +598,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_list_behavior(config, args)
         if args.command == "compute-profile":
             return run_compute_profile(config, args)
+        if args.command == "scan-alerts":
+            return run_scan_alerts(config, args)
+        if args.command == "list-alerts":
+            return run_list_alerts(config, args)
+        if args.command == "resolve-alert":
+            return run_resolve_alert(config, args)
+        if args.command == "alert-stats":
+            return run_alert_stats(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
