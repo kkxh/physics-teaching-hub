@@ -43,6 +43,14 @@ DEFAULT_HOMEWORK_TOPICS: tuple[str, ...] = (
     "电路分析",
 )
 
+# 画像维度（P2.4）：成绩水平 / 作业习惯 / 错因控制
+PROFILE_DIMENSIONS: tuple[str, ...] = ("score_level", "homework_habit", "error_control")
+DEFAULT_PROFILE_WEIGHTS: Mapping[str, float] = {
+    "score_level": 0.5,
+    "homework_habit": 0.3,
+    "error_control": 0.2,
+}
+
 # 环境变量白名单：变量名 → 它覆盖的配置项（dotted key）。
 # 只有这里列出的变量能参与配置；白名单之外的变量一律忽略，
 # 这样「配置从哪来」始终可追踪，也不会因为机器上的杂散变量改变行为。
@@ -87,6 +95,8 @@ class AppConfig:
     labels: Labels
     # 错因标签字典的扩展：代码 → 显示名（内置词典在 errors.py）
     error_tags: Mapping[str, str] = field(default_factory=dict)
+    # 画像维度权重（P2.4），未配置时用默认值
+    profile_weights: Mapping[str, float] = field(default_factory=dict)
     # 相对路径的解析基准：load_config 传配置文件所在目录，直接调用 parse_config 时为当前工作目录。
     base_dir: Path = Path(".")
     # 教学阶段：配置里写了 [[phases]] 就用配置的，否则用学段 profile 的默认阶段。
@@ -212,6 +222,7 @@ def parse_config(
     schedule_raw = raw.get("schedule") or {}
     demo_raw = raw.get("demo") or {}
     error_tags_raw = raw.get("error_tags") or {}
+    profile_raw = raw.get("profile") or {}
 
     locale = str(project_raw.get("locale") or DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
     labels = _load_labels(project_raw.get("labels_dir"), base, locale)
@@ -239,6 +250,7 @@ def parse_config(
     phases = _parse_phases(raw.get("phases"), semester, stage, labels)
     demo = _parse_demo(demo_raw, base)
     error_tags = _parse_error_tags(error_tags_raw)
+    profile_weights = _parse_profile_weights(profile_raw)
 
     return AppConfig(
         project=project,
@@ -251,6 +263,7 @@ def parse_config(
         base_dir=base,
         phases=phases,
         error_tags=error_tags,
+        profile_weights=profile_weights,
     )
 
 
@@ -634,3 +647,29 @@ def _parse_error_tags(raw: Any) -> dict[str, str]:
             raise ConfigError(f"配置项 error_tags 里的 {key} 缺少显示名。")
         tags[key] = text
     return tags
+
+
+def _parse_profile_weights(raw: Any) -> dict[str, float]:
+    """解析 [profile]：维度名 → 权重；不认识的维度名直接报错，避免拼错了没生效。"""
+    if not isinstance(raw, Mapping):
+        raise ConfigError(
+            f"配置项 profile 应是一张表：[profile] 里写 {'、'.join(PROFILE_DIMENSIONS)} = 权重。"
+        )
+
+    weights = dict(DEFAULT_PROFILE_WEIGHTS)
+    for key, value in raw.items():
+        name = str(key).strip()
+        if name not in PROFILE_DIMENSIONS:
+            raise ConfigError(
+                f"配置项 profile 里有不认识的维度：{name!r}；"
+                f"只能是 {'、'.join(PROFILE_DIMENSIONS)}。"
+            )
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ConfigError(f"配置项 profile.{name} 的权重应为数字，收到：{value!r}。")
+        if value < 0:
+            raise ConfigError(f"配置项 profile.{name} 的权重不能是负数：{value}。")
+        weights[name] = float(value)
+
+    if sum(weights.values()) <= 0:
+        raise ConfigError("配置项 profile 的权重不能全是 0；至少要有一个正权重。")
+    return weights

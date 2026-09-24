@@ -29,6 +29,7 @@ import importer
 import import_scores
 import init_db
 import make_report
+import profiling
 
 
 def add_global_options(
@@ -155,6 +156,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_global_options(list_behavior_parser, suppress_defaults=True)
     list_behavior_parser.add_argument("--student", required=True, help="学生 student_uid")
+
+    profile_parser = subparsers.add_parser(
+        "compute-profile",
+        help="计算学生画像（默认只算源数据变过的学生）",
+        description=(
+            "计算学生画像并写入 ability_scores。维度：成绩水平 / 作业习惯 / 错因控制，"
+            "权重在 config.toml 的 [profile] 段；默认只重算源数据变过的学生，"
+            "--rebuild 全部重算，--student 只算一个人。"
+        ),
+    )
+    add_global_options(profile_parser, suppress_defaults=True)
+    profile_parser.add_argument("--student", default=None, help="只算这个 student_uid")
+    profile_parser.add_argument("--rebuild", action="store_true", help="全部重算")
 
     return parser
 
@@ -437,6 +451,20 @@ def run_list_behavior(config: config_loader.AppConfig, args: argparse.Namespace)
     return 0
 
 
+def run_compute_profile(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    result = profiling.compute_profiles(
+        config, student_uid=args.student, rebuild=args.rebuild
+    )
+    print(
+        f"已计算 {result['computed']} 名学生的画像"
+        f"（跳过 {result['skipped']} 名源数据未变化的，写入 {result['written']} 行，"
+        f"computed_at={result['computed_at']} UTC）"
+    )
+    if result["profiles"]:
+        print(profiling.format_profile_table(result["profiles"]))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -465,6 +493,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_record_behavior(config, args)
         if args.command == "list-behavior":
             return run_list_behavior(config, args)
+        if args.command == "compute-profile":
+            return run_compute_profile(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2

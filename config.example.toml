@@ -89,3 +89,9 @@ periods = ["第1节", "第2节", "第7节"]
 # 内置：model_choice（模型选择）/ graph_reading（图像读取）/ calculation（计算失误）/
 #       expression（表达不规范）/ concept_confusion（概念混淆）
 # 例：experiment_design = "实验设计"
+
+[profile]
+# 画像三个维度的权重（用于综合分）；不写就用默认 0.5 / 0.3 / 0.2。
+score_level = 0.5
+homework_habit = 0.3
+error_control = 0.2

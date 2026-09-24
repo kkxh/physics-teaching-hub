@@ -89,6 +89,7 @@ SCANNED_MODULES = (
     "init_db.py",
     "labels.py",
     "make_report.py",
+    "profiling.py",
     "stage_profiles.py",
     "teaching_calendar.py",
     "seed_demo_data.py",
