@@ -18,6 +18,7 @@ from typing import Any, Mapping
 
 import config_loader
 import db as db_module
+import exam as exam_module
 import init_db
 import seed_demo_data
 
@@ -107,7 +108,9 @@ def import_demo_scores(config: config_loader.AppConfig) -> dict[str, int]:
     conn = db_module.connect(config.paths.database)
     try:
         db_module.require_schema(conn)
-        return import_exam_scores(conn, dataset)
+        counts = import_exam_scores(conn, dataset)
+        item_counts = exam_module.import_demo_item_scores(conn, dataset)
+        return {**counts, **item_counts}
     finally:
         conn.close()
 

@@ -83,6 +83,7 @@ SCANNED_MODULES = (
     "config_loader.py",
     "db.py",
     "errors.py",
+    "exam.py",
     "hub.py",
     "homework.py",
     "importer.py",

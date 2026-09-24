@@ -25,6 +25,7 @@ import alerts as alerts_module
 import config_loader
 import db as db_module
 import errors as errors_module
+import exam as exam_module
 import homework as homework_module
 import importer
 import import_scores
@@ -230,6 +231,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_global_options(patrol_parser, suppress_defaults=True)
 
+    item_parser = subparsers.add_parser(
+        "import-item-scores",
+        help="导入某场考试的小题得分（CSV）",
+        description=(
+            "导入小题得分：列约定 student_uid / name / item_no / score（可选 full_score）。"
+            "考试必须已存在（先用 import-scores 建考试）；--item-score 是没给满分时的小题默认满分。"
+        ),
+    )
+    add_global_options(item_parser, suppress_defaults=True)
+    item_parser.add_argument("--csv", required=True, help="小题得分表（CSV，带表头）")
+    item_parser.add_argument("--exam-key", required=True, help="考试标识")
+    item_parser.add_argument(
+        "--item-score",
+        dest="item_score",
+        type=float,
+        default=exam_module.DEFAULT_ITEM_FULL_SCORE,
+        help=f"小题默认满分（没在表里给 full_score 时用），默认 {exam_module.DEFAULT_ITEM_FULL_SCORE:g}",
+    )
+    item_parser.add_argument("--columns", default=None, help='表头映射，如 "题号=item_no"')
+    item_parser.add_argument("--dry-run", action="store_true", help="只预览，不写库")
+
+    analysis_parser = subparsers.add_parser(
+        "exam-analysis", help="生成考试分析（逐题得分率/难度/区分度）"
+    )
+    add_global_options(analysis_parser, suppress_defaults=True)
+    analysis_parser.add_argument("--exam-key", required=True, help="考试标识")
+
+    handout_parser = subparsers.add_parser(
+        "make-handout", help="生成讲评讲义（不含试卷原题，题目位置用自制示例题标记占位）"
+    )
+    add_global_options(handout_parser, suppress_defaults=True)
+    handout_parser.add_argument("--exam-key", required=True, help="考试标识")
+
     return parser
 
 
@@ -348,6 +382,10 @@ def run_import_scores(config: config_loader.AppConfig, args: argparse.Namespace)
         f"已导入演示成绩：{counts['exams']} 场考试 / {counts['scores']} 条成绩"
         f"（数据库：{config.paths.database}）"
     )
+    if counts.get("item_scores"):
+        print(
+            f"已导入演示小题：{counts['items']} 道 / {counts['item_scores']} 条小题得分"
+        )
     return 0
 
 
@@ -639,6 +677,55 @@ def run_phase_patrol(config: config_loader.AppConfig, args: argparse.Namespace) 
     return 0
 
 
+def run_import_item_scores(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    result = exam_module.import_item_scores_from_csv(
+        config,
+        csv_path=args.csv,
+        exam_key=args.exam_key,
+        default_item_score=args.item_score,
+        dry_run=args.dry_run,
+        columns_spec=args.columns,
+    )
+    plan = result["plan"]
+    for warning in plan.warnings:
+        print(f"[提醒] {warning}")
+    if result["dry_run"]:
+        print(
+            f"[dry-run] 考试：{plan.exam_name}（{plan.exam_key}）；"
+            f"涉及 {len(plan.items)} 道小题、待写入 {plan.row_count} 条小题得分。"
+        )
+        print("[dry-run] 没有写入任何数据。")
+        return 0
+    print(
+        f"已导入小题得分：{result['item_scores_written']} 条"
+        f"（考试：{plan.exam_key}，{result['items_written']} 道小题）"
+    )
+    return 0
+
+
+def run_exam_analysis(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        path = exam_module.write_exam_analysis(config, conn, exam_key=args.exam_key)
+    finally:
+        conn.close()
+    print(f"已生成考试分析：{path}")
+    return 0
+
+
+def run_make_handout(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        path = exam_module.write_handout(config, conn, exam_key=args.exam_key)
+    finally:
+        conn.close()
+    print(f"已生成讲评讲义：{path}")
+    print(f"提示：讲义不含试卷原题，题目位置用 {exam_module.SAMPLE_QUESTION_MARKER} 标记占位。")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -683,6 +770,12 @@ def main(argv: list[str] | None = None) -> int:
             return run_weekly_report(config, args)
         if args.command == "phase-patrol":
             return run_phase_patrol(config, args)
+        if args.command == "import-item-scores":
+            return run_import_item_scores(config, args)
+        if args.command == "exam-analysis":
+            return run_exam_analysis(config, args)
+        if args.command == "make-handout":
+            return run_make_handout(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2

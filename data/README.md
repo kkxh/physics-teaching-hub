@@ -70,3 +70,20 @@ python3 hub.py homework-stats [--class 高一(A)班]
   转班学生的历史提交不计入任何班级（否则完成率会超过 100%）。缺交 = 应交 − 已交；迟交单列；
   订正率 = 有订正的已交记录 / 已交记录。
 - Phase 2 不做历史名册：应交按「当前名册 × 作业份数」回算，中途插班的学生会算进更早的作业。
+
+## 小题得分表（CSV）约定
+
+```bash
+python3 hub.py import-item-scores --csv 小题得分.csv --exam-key demo-exam-1 --item-score 20
+python3 hub.py exam-analysis --exam-key demo-exam-1     # 逐题得分率/难度/区分度
+python3 hub.py make-handout --exam-key demo-exam-1      # 讲评讲义（不含试卷原题）
+```
+
+- 表头默认认：`student_uid`（学号，推荐）、`name`（姓名）、`item_no`（题号）、`score`（得分）、
+  `full_score`（该题满分，可选）；表头不同用 `--columns 题号=item_no,得分=score` 映射。
+- 考试必须**先存在**（用 `import-scores` 建考试），本命令不新建考试；学生匹配规则同成绩表。
+- 没给 `full_score` 时用 `--item-score`（默认 10）当该题满分；得分超过满分会被拒绝。
+- 重复导入幂等：同一（考试, 题号）与（题目, 学生）就地覆盖。
+- 分析口径：难度系数 P = 得分率（易 P ≥ 0.7 / 中 0.4 ~ 0.7 / 难 < 0.4）；
+  区分度用高低分组法（按总分取前 27% 与后 27%，至少各 1 人），D = 高分组得分率 − 低分组得分率。
+- 讲义里**不放任何试卷原题**：题目位置用 `【自制示例题】` 标记占位，题面请自行补入你有权使用的材料。

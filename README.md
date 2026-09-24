@@ -76,6 +76,8 @@ python3 hub.py resolve-alert 1 --note "已和家长沟通"   # 解决预警并�
 python3 hub.py list-follow-ups --alert 1              # 查看某条预警的跟进记录
 python3 hub.py weekly-report --week 2026-W45          # 某一周的周报（默认上一周）
 python3 hub.py phase-patrol                           # 阶段巡检：进度 / 覆盖 / 预警 / 提醒
+python3 hub.py exam-analysis --exam-key demo-exam-1    # 考试分析：逐题得分率/难度/区分度
+python3 hub.py make-handout --exam-key demo-exam-1     # 讲评讲义（不含试卷原题）
 ```
 
 错因标签字典内置 5 类，可在 `config.toml` 的 `[error_tags]` 里改显示名或加自己的代码。

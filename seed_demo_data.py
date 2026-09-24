@@ -32,7 +32,7 @@ from typing import Any, Mapping
 import config_loader
 import errors as errors_module
 
-DATASET_VERSION = "demo.v5"
+DATASET_VERSION = "demo.v6"
 
 # 错因标签的显示名统一来自 errors.py 的内置词典（单一事实来源）
 ERROR_TAGS = tuple(label for _code, label in errors_module.BUILTIN_ERROR_TAGS)
@@ -113,12 +113,45 @@ def build_dataset(config: config_loader.AppConfig) -> dict[str, Any]:
         classes.append({"name": class_name, "students": students})
 
     exams: list[dict[str, Any]] = []
+    item_count = 5
     for index, exam in enumerate(config.demo.exams, start=1):
+        items = [
+            {
+                "item_no": f"{position}",
+                "full_score": float(exam.full_score) / item_count,
+                "scores": [],
+            }
+            for position in range(1, item_count + 1)
+        ]
         scores = []
         for _class_name, student_id in roster:
             base = rng.gauss(mu=72.0, sigma=13.0)
             score = max(0, min(exam.full_score, round(base)))
             scores.append({"student_id": student_id, "score": score})
+            # 把总分拆到小题：按随机权重分配、每题不超过满分，余数补到还有空位的题上，
+            # 保证小题和等于总分（演示数据自洽，分析结果才对得上）
+            weights = [rng.random() + 0.2 for _ in range(item_count)]
+            total_weight = sum(weights)
+            parts = [0] * item_count
+            remaining = int(score)
+            order = sorted(range(item_count), key=lambda pos: -weights[pos])
+            for position in order:
+                capacity = int(items[position]["full_score"])
+                take = min(int(round(score * weights[position] / total_weight)), capacity)
+                take = min(take, remaining)
+                parts[position] = take
+                remaining -= take
+            for position in order:
+                if remaining <= 0:
+                    break
+                capacity = int(items[position]["full_score"])
+                add = min(capacity - parts[position], remaining)
+                parts[position] += add
+                remaining -= add
+            for position, item in enumerate(items):
+                item["scores"].append(
+                    {"student_id": student_id, "score": parts[position]}
+                )
         exams.append(
             {
                 "key": f"demo-exam-{index}",
@@ -128,6 +161,7 @@ def build_dataset(config: config_loader.AppConfig) -> dict[str, Any]:
                 ).isoformat(),
                 "full_score": exam.full_score,
                 "scores": scores,
+                "items": items,
             }
         )
 
@@ -259,12 +293,42 @@ def check_dataset(
             if not pattern.match(student["name"]):
                 problems.append(f"发现非虚构姓名：{student['name']}")
 
+    roster_uids = set(student_ids)
     for exam in dataset.get("exams") or []:
         if len(exam.get("scores") or []) != len(student_ids):
             problems.append(f"{exam.get('key')} 的成绩条数与总人数不一致")
         problems.extend(
             _date_problems(exam.get("date"), semester, f"{exam.get('name')} 的日期")
         )
+
+        seen_item_numbers: set[str] = set()
+        item_score_count = len(exam.get("scores") or [])
+        for item in exam.get("items") or []:
+            item_no = str(item.get("item_no") or "")
+            label = f"{exam.get('key')} 的小题 {item_no or '（无题号）'}"
+            if not item_no:
+                problems.append(f"{label} 缺少 item_no")
+            elif item_no in seen_item_numbers:
+                problems.append(f"{exam.get('key')} 的小题号重复：{item_no}")
+            else:
+                seen_item_numbers.add(item_no)
+
+            full = item.get("full_score")
+            if not isinstance(full, (int, float)) or full <= 0:
+                problems.append(f"{label} 的满分不合法：{full!r}")
+            item_scores = item.get("scores") or []
+            if len(item_scores) != item_score_count:
+                problems.append(
+                    f"{label} 的得分条数（{len(item_scores)}）与总分数不一致"
+                )
+            for record in item_scores:
+                if str(record.get("student_id") or "") not in roster_uids:
+                    problems.append(f"{label} 里有不在名单里的学生")
+                value = record.get("score")
+                if value is None or value < 0:
+                    problems.append(f"{label} 里有缺失或负数的小题得分")
+                elif isinstance(full, (int, float)) and value > full:
+                    problems.append(f"{label} 里有超过满分的小题得分：{value!r}")
 
     seen_assign_keys: set[str] = set()
     for item in dataset.get("homework") or []:
@@ -308,7 +372,6 @@ def check_dataset(
                 elif not correction.get("corrected_on"):
                     problems.append(f"{label} 的订正缺少 corrected_on")
 
-    roster_uids = set(student_ids)
     exam_keys = {str(item.get("key") or "") for item in dataset.get("exams") or []}
     allowed_tags = {code for code, _label in errors_module.BUILTIN_ERROR_TAGS} | set(
         config.error_tags
