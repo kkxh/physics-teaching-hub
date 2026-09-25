@@ -24,6 +24,7 @@ from pathlib import Path
 import alerts as alerts_module
 import api as api_module
 import config_loader
+import dashboard as dashboard_module
 import db as db_module
 import errors as errors_module
 import exam as exam_module
@@ -281,6 +282,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=api_module.DEFAULT_PORT,
         help=f"端口，默认 {api_module.DEFAULT_PORT}",
     )
+
+    dashboard_parser = subparsers.add_parser(
+        "make-dashboard",
+        help="生成可离线打开的教学看板（静态站，数据构建时嵌入）",
+        description=(
+            "从本地库生成 outputs/dashboard/：index.html + data.json。数据在构建时嵌进 HTML，"
+            "双击 index.html 即可离线查看，不依赖 API、不引用任何 CDN；页面文字取自 labels。"
+        ),
+    )
+    add_global_options(dashboard_parser, suppress_defaults=True)
 
     return parser
 
@@ -749,6 +760,18 @@ def run_serve(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def run_make_dashboard(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        path = dashboard_module.write_dashboard(config, conn)
+    finally:
+        conn.close()
+    print(f"已生成看板：{path}")
+    print("提示：双击 index.html 即可离线查看；数据在构建时嵌入，不依赖 API。")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -801,6 +824,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_make_handout(config, args)
         if args.command == "serve":
             return run_serve(config, args)
+        if args.command == "make-dashboard":
+            return run_make_dashboard(config, args)
     except config_loader.ConfigError as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
