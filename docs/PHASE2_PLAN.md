@@ -618,6 +618,7 @@ python3 hub.py make-dashboard
 | R3-1 | 自定义文案表是早期版本（没有 `[dashboard]` 段）时，`make-dashboard` 抛原始 traceback | `dashboard.collect_labels` 把缺 key 翻成带 `[dashboard]` 提示的 `ConfigError`；`hub.main` 兜底捕获 `labels.LabelError`（退出码 2）。实测：现在是一行可操作错误，不再是栈 |
 | R3-2 | 隐私扫描的手机号 / 身份证号规则会误判浮点数的长数字串（实测 `--strict` 在看板数据上报 false positive） | 两条规则加两侧数字边界；新增两个回归用例：浮点数字串不报警、像手机号的号码仍然报警 |
 | R3-3 | 文案扫描清单漏了 `api.py`，且没有机制防止以后漏 | 补进清单，并新增守护测试「清单必须覆盖所有生产模块」；`REQUIRED_KEYS` 补上 `[dashboard]` 关键 key |
+| R3-4（最严重） | 隐私扫描的内容检查在 Linux/CI 上一直**静默空转**：`mktemp -t privacy_scan` 在 GNU coreutils 上因模板缺少 `XXX` 而失败，模式文件空 → `grep -f ""` 失败 → 只做路径检查却报「通过」（macOS 的 BSD mktemp 行为不同，所以本地一直"正常"） | 用 `mktemp "$TMPDIR/privacy_scan.XXXXXX"` 显式模板；模式文件建不出来直接报错退出码 2；`grep` 退出码 >1（说明检查本身出错）也判失败。新增 `ENGINEERING_NOTES` 第 14 条 |
 
 顺带把两处文档对齐：README 的「现在能做什么」按 Phase 2 能力重写（补齐 `import-homework`、
 `import-item-scores`、`list-alerts`、`alert-stats` 四个命令）；台账预吸收清单里最后两条标为「不适用」并写明原因

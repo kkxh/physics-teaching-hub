@@ -122,16 +122,30 @@ for file in "${files[@]}"; do
   fi
 done
 
-pattern_file="$(mktemp -t privacy_scan)"
+# 注意：`mktemp -t name` 在 GNU coreutils 上要求模板里带 XXX，在 macOS 上却能直接用，
+# 所以这里显式给出模板——否则 Linux/CI 上会静默拿不到模式文件，内容检查变成空转。
+pattern_file="$(mktemp "${TMPDIR:-/tmp}/privacy_scan.XXXXXX")" || true
+if [[ -z "$pattern_file" || ! -f "$pattern_file" ]]; then
+  echo "[错误] 无法创建临时模式文件，隐私扫描的内容检查没能执行；请检查 TMPDIR 权限。"
+  exit 2
+fi
 trap 'rm -f "$pattern_file"' EXIT
 printf '%s\n' "${patterns[@]}" > "$pattern_file"
 
 if [[ ${#existing[@]} -gt 0 ]]; then
   if hits=$(grep -nIE -f "$pattern_file" --binary-files=without-match \
-      --exclude="$SELF_PATH" -- "${existing[@]}" 2>/dev/null); then
+      --exclude="$SELF_PATH" -- "${existing[@]}"); then
     echo "发现疑似隐私或凭据内容："
     echo "$hits"
     status=1
+  else
+    grep_status=$?
+    if (( grep_status > 1 )); then
+      # grep 退出码 >1 说明扫描本身出错了（模式文件、参数、文件读取等），
+      # 这种情况必须报错，不能让「检查没跑成」看起来像「检查通过」
+      echo "[错误] 隐私扫描的内容检查执行失败（grep 退出码 $grep_status）。"
+      status=1
+    fi
   fi
 fi
 
