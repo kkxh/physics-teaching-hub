@@ -2,7 +2,7 @@
 
 面向中学物理教师的本地教学数据中枢：把课堂记录、作业与订正、错因、学生画像、阶段巡检和练习推荐放进同一个本地数据库，由命令行与本地看板驱动，数据不出本机。
 
-> **当前状态：v0.0.1，Phase 1（通用化地基）已完成。**
+> **当前状态：v0.0.1，Phase 2（逐模块搬运）已完成。**
 > 本仓库是作者私有教学系统的开源精简版，正在按 [docs/ROADMAP.md](docs/ROADMAP.md) 逐步搬运通用能力。
 > 功能会**长期落后于**内部版本，这是预期状态，不是缺陷；接口也会随搬运调整。
 
@@ -10,12 +10,17 @@
 
 ## 现在能做什么
 
-Phase 1 的通用化地基已经能跑通一条最小闭环——**建库 → 导入成绩 → 生成报告**，全部使用虚构演示数据：
+Phase 1 的通用化地基 + Phase 2 的模块搬运都已经落地，全部使用虚构演示数据：
 
-- **最小闭环**：`init_db.py --demo` → `import_scores.py` → `make_report.py`，产出 `outputs/phase1_report.md`（含学期、教学周、教学阶段与考试统计）。
 - **配置外置**：学段、学科、学期、课表、班级、数据库路径都由 `config.toml` 决定，见下方「配置」。
 - **文案外置**：学科名、学段名、阶段名、常用术语与演示提示语都放在 `labels/zh-CN.toml`，代码里只出现 key，见下方「文案」。
 - **虚构演示数据生成器**：`seed_demo_data.py` 生成完全虚构的班级、学生、成绩与作业记录。
+- **最小闭环**：`hub.py init-db --demo` → `import-scores --demo` → `make-report`，产出 `outputs/phase1_report.md`。
+- **导入**：成绩（CSV / Excel）、作业提交、小题得分，都支持列名映射与 `--dry-run` 预览。
+- **记录**：错因（标签字典可扩展）与行为记录；写操作走「预览 → `--yes` → 单事务」。
+- **分析**：学生画像（成绩水平/作业习惯/错因控制 + 综合分，支持增量重算）、作业完成率（转班学生不吃亏的口径）、考试逐题分析（得分率/难度/区分度）。
+- **输出**：周报、阶段巡检、考试分析、讲评讲义（不含试卷原题）、可离线双击打开的本地看板。
+- **本地 API**：只读 GET、只绑 `127.0.0.1`、CORS 白名单，见下方。
 - **隐私扫描**：`scripts/privacy_scan.sh` 在提交前拦住真实数据、绝对路径与凭据痕迹。
 - **持续集成**：GitHub Actions 跑测试、演示数据自检与隐私扫描。
 
@@ -80,6 +85,11 @@ python3 hub.py exam-analysis --exam-key demo-exam-1    # 考试分析：逐题�
 python3 hub.py make-handout --exam-key demo-exam-1     # 讲评讲义（不含试卷原题）
 python3 hub.py serve --port 8420                      # 本地只读 API（只绑 127.0.0.1）
 python3 hub.py make-dashboard                         # 生成可离线双击打开的看板
+python3 hub.py import-homework --csv 作业.csv --assign-key hw-01 \
+    --class 高一(A)班 --topic "运动学图像" --assigned-date 2026-09-30   # 作业提交导入
+python3 hub.py import-item-scores --csv 小题得分.csv --exam-key demo-exam-1  # 小题得分导入
+python3 hub.py list-alerts --status open              # 列出预警
+python3 hub.py alert-stats                            # 预警统计
 ```
 
 本地 API 只做只读 GET，供看板前端或本地脚本查询：

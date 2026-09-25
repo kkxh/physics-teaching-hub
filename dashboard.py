@@ -20,6 +20,7 @@ from typing import Any, Mapping
 import api as api_module
 import config_loader
 import db as db_module
+from labels import LabelError
 
 DATA_FILENAME = "data.json"
 HTML_FILENAME = "index.html"
@@ -61,9 +62,15 @@ MAX_ALERT_ROWS = 20
 
 def collect_labels(config: config_loader.AppConfig) -> dict[str, str]:
     """看板要用的文案：缺 key 直接报错，不静默用默认值。"""
-    return {
-        key: config.labels.get(f"dashboard.{key}") for key in DASHBOARD_LABEL_KEYS
-    }
+    try:
+        return {
+            key: config.labels.get(f"dashboard.{key}") for key in DASHBOARD_LABEL_KEYS
+        }
+    except LabelError as exc:
+        raise config_loader.ConfigError(
+            f"{exc}（看板需要 [dashboard] 段；如果你的文案表是早期版本复制来的，"
+            "请把仓库 labels/zh-CN.toml 的 [dashboard] 段补进去）"
+        ) from exc
 
 
 def collect_dashboard_data(

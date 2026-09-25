@@ -113,6 +113,32 @@ class PrivacyScanTests(unittest.TestCase):
             ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True
         ).stdout)
 
+    def test_float_digits_do_not_trip_the_phone_pattern(self):
+        """浮点数的长数字串不该被当成手机号（P2.9 的看板数据里就有）。"""
+        probe = ROOT / "privacy_probe_float.txt"
+        probe.write_text(
+            'average = 73.61666666666666\nrate = 0.9166666666666666\n',
+            encoding="utf-8",
+        )
+        self.addCleanup(lambda: probe.unlink(missing_ok=True))
+
+        result = self.run_scan("--all")
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertNotIn("privacy_probe_float.txt", result.stdout)
+
+    def test_real_looking_phone_number_is_still_caught(self):
+        probe = ROOT / "privacy_probe_phone.txt"
+        # 号码在运行时拼出来：避免测试文件本身留下一个"像手机号"的字面量
+        fake_phone = "1" + "38" + "1234" + "5678"
+        probe.write_text(f"联系电话：{fake_phone}\n", encoding="utf-8")
+        self.addCleanup(lambda: probe.unlink(missing_ok=True))
+
+        result = self.run_scan("--all")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("privacy_probe_phone.txt", result.stdout)
+
 
 class ArchiveTests(unittest.TestCase):
     def test_archive_runs_the_loop_without_untracked_files(self):

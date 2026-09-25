@@ -39,6 +39,10 @@ REQUIRED_KEYS = (
     "demo.notice",
     "demo.student_name_prefix",
     "demo.homework_prefix",
+    # 看板文案（P2.9 起）：模板只留占位符，缺一段会直接报错
+    "dashboard.title",
+    "dashboard.empty_value",
+    "dashboard.no_data",
 )
 
 CUSTOM_LOCALE = "test-zh"
@@ -80,6 +84,7 @@ homework_prefix = "演示练习"
 FORBIDDEN_WORDS = ("物理", "高中", "初中")
 SCANNED_MODULES = (
     "alerts.py",
+    "api.py",
     "config_loader.py",
     "dashboard.py",
     "db.py",
@@ -305,6 +310,18 @@ class HardcodedWordingTests(unittest.TestCase):
         for name in SCANNED_MODULES:
             with self.subTest(module=name):
                 self.assertTrue((ROOT / name).is_file(), msg=f"{name} 不存在，扫描清单该更新了")
+
+    def test_scan_list_covers_every_production_module(self):
+        """新增模块必须同步进扫描清单，否则文案收口会悄悄失守。"""
+        production = {path.name for path in ROOT.glob("*.py")}
+
+        missing = sorted(production - set(SCANNED_MODULES))
+
+        self.assertEqual(
+            missing,
+            [],
+            msg=f"这些模块没纳入文案扫描清单：{missing}",
+        )
 
     def test_modules_do_not_hardcode_subject_or_stage_words(self):
         hits: list[str] = []

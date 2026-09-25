@@ -35,6 +35,7 @@ import init_db
 import make_report
 import profiling
 import reports
+from labels import LabelError
 
 
 def add_global_options(
@@ -827,6 +828,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "make-dashboard":
             return run_make_dashboard(config, args)
     except config_loader.ConfigError as exc:
+        print(f"[错误] {exc}", file=sys.stderr)
+        return 2
+    except LabelError as exc:
+        # 运行期取文案缺 key：不要抛原始栈，按普通错误处理
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
     except sqlite3.Error as exc:
