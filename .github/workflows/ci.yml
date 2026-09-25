@@ -44,6 +44,11 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -t . -v
 
+      # 报告/画像里有一批跟「今天」有关的逻辑：CI 默认跑在 UTC，这里再按东八区跑一遍
+      # 时间敏感的那几个测试，避免再出现「本地绿、CI 红」的时区问题
+      - name: Run date-sensitive tests in a non-UTC timezone
+        run: TZ=Asia/Shanghai python -m unittest tests.test_reports tests.test_profile tests.test_teaching_calendar -v
+
       - name: Demo data self-check
         run: python seed_demo_data.py --check
 

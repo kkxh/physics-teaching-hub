@@ -24,6 +24,8 @@
 - 怎么验：schema 默认值里不出现本地时区函数；测试断言落库值是 UTC。
 - 附带一条测试约定：要「今天」就按配置时区算（`TeachingCalendar.today()`），
   不要用本机 `date.today()`——CI 跑在 UTC，本地跑在 Asia/Shanghai 时会差一天。
+  推之前建议本地也跑一遍 `TZ=UTC python3 -m unittest discover -s tests -t .`；
+  CI 里另有一趟 `TZ=Asia/Shanghai` 的时间敏感用例，两头都兜住。
 
 ## 3. 数据库：连接、外键与 schema 完整性
 
