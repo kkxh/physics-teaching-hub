@@ -134,10 +134,15 @@ class PrivacyScanTests(unittest.TestCase):
         probe.write_text(f"联系电话：{fake_phone}\n", encoding="utf-8")
         self.addCleanup(lambda: probe.unlink(missing_ok=True))
 
-        result = self.run_scan("--all")
+        # --strict 用 find 扫整个工作区（不依赖 git 列表），最稳；
+        # --all 走 git 列表，两种都断言，出问题时日志里能分辨是哪一环
+        strict = self.run_scan("--strict")
+        self.assertEqual(strict.returncode, 1, msg=strict.stdout + strict.stderr)
+        self.assertIn("privacy_probe_phone.txt", strict.stdout)
 
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("privacy_probe_phone.txt", result.stdout)
+        worktree = self.run_scan("--all")
+        self.assertEqual(worktree.returncode, 1, msg=worktree.stdout + worktree.stderr)
+        self.assertIn("privacy_probe_phone.txt", worktree.stdout)
 
 
 class ArchiveTests(unittest.TestCase):
