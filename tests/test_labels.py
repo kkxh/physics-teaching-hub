@@ -43,6 +43,12 @@ REQUIRED_KEYS = (
     "dashboard.title",
     "dashboard.empty_value",
     "dashboard.no_data",
+    # 组卷讲义文案（P3.4 起）：结构走文案表，内容只放自制示例或使用者题库
+    "handout.title_questions",
+    "handout.section_questions",
+    "handout.section_answers",
+    "handout.answers_hidden",
+    "handout.boundary",
 )
 
 CUSTOM_LOCALE = "test-zh"

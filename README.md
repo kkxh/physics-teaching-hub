@@ -84,6 +84,7 @@ python3 hub.py weekly-report --week 2026-W45          # 某一周的周报（默
 python3 hub.py phase-patrol                           # 阶段巡检：进度 / 覆盖 / 预警 / 提醒
 python3 hub.py exam-analysis --exam-key demo-exam-1    # 考试分析：逐题得分率/难度/区分度
 python3 hub.py make-handout --exam-key demo-exam-1     # 讲评讲义（不含试卷原题）
+python3 hub.py make-handout --question-keys k1,k2       # 题目讲义（按题库 key 组卷，默认不含答案）
 python3 hub.py serve --port 8420                      # 本地只读 API（只绑 127.0.0.1）
 python3 hub.py make-dashboard                         # 生成可离线双击打开的看板
 python3 hub.py import-homework --csv 作业.csv --assign-key hw-01 \

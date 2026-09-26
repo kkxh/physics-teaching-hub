@@ -327,10 +327,32 @@ def build_parser() -> argparse.ArgumentParser:
     analysis_parser.add_argument("--exam-key", required=True, help="考试标识")
 
     handout_parser = subparsers.add_parser(
-        "make-handout", help="生成讲评讲义（不含试卷原题，题目位置用自制示例题标记占位）"
+        "make-handout",
+        help="生成讲义：讲评讲义（--exam-key）或题库组卷讲义（--question-keys / --recommend-for）",
     )
     add_global_options(handout_parser, suppress_defaults=True)
-    handout_parser.add_argument("--exam-key", required=True, help="考试标识")
+    handout_parser.add_argument("--exam-key", default=None, help="考试标识（讲评讲义）")
+    handout_parser.add_argument(
+        "--question-keys",
+        default=None,
+        help="按 question_key 组卷，逗号分隔（题目讲义）",
+    )
+    handout_parser.add_argument(
+        "--recommend-for",
+        default=None,
+        help="按某学生的推荐结果组卷（题目讲义，参数是学号）",
+    )
+    handout_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=f"--recommend-for 时最多取几道，默认 {questions_module.DEFAULT_RECOMMEND_LIMIT}",
+    )
+    handout_parser.add_argument(
+        "--with-answer",
+        action="store_true",
+        help="组卷讲义附答案与解析（默认不含）",
+    )
 
     serve_parser = subparsers.add_parser(
         "serve",
@@ -810,14 +832,92 @@ def run_exam_analysis(config: config_loader.AppConfig, args: argparse.Namespace)
 
 
 def run_make_handout(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    modes = [
+        ("--exam-key", args.exam_key),
+        ("--question-keys", args.question_keys),
+        ("--recommend-for", args.recommend_for),
+    ]
+    chosen = [name for name, value in modes if value]
+    if len(chosen) != 1:
+        print(
+            "[错误] make-handout 请三选一：--exam-key 考试标识（讲评讲义）／"
+            "--question-keys k1,k2（按 key 组卷）／--recommend-for 学生学号（按推荐组卷）。",
+            file=sys.stderr,
+        )
+        return 2
+    if args.exam_key and (args.with_answer or args.limit is not None):
+        print(
+            "[错误] --with-answer 与 --limit 只在组卷模式（--question-keys / --recommend-for）下使用。",
+            file=sys.stderr,
+        )
+        return 2
+    if args.question_keys and args.limit is not None:
+        print(
+            "[错误] --limit 只在 --recommend-for 组卷时使用。",
+            file=sys.stderr,
+        )
+        return 2
+
     conn = db_module.connect(config.paths.database)
     try:
         db_module.require_schema(conn)
-        path = exam_module.write_handout(config, conn, exam_key=args.exam_key)
+        if args.exam_key:
+            path = exam_module.write_handout(config, conn, exam_key=args.exam_key)
+            print(f"已生成讲评讲义：{path}")
+            print(
+                "提示：讲义不含试卷原题，题目位置用 "
+                f"{exam_module.SAMPLE_QUESTION_MARKER} 标记占位。"
+            )
+            return 0
+
+        if args.question_keys:
+            keys = [piece.strip() for piece in args.question_keys.split(",") if piece.strip()]
+            if not keys:
+                print("[错误] --question-keys 至少给一个题目 key。", file=sys.stderr)
+                return 2
+            items = questions_module.fetch_questions(conn, keys)
+            path = exam_module.write_question_handout(
+                config,
+                items,
+                source=f"按题目 key 组卷（{'、'.join(keys)}）",
+                anchor=keys[0],
+                with_answer=args.with_answer,
+            )
+        else:
+            if questions_module.count_questions(conn) == 0:
+                raise config_loader.ConfigError(
+                    "题库为空：先跑 python3 hub.py import-questions --demo，"
+                    "或用 --json / --csv 导入你自己的题库。"
+                )
+            limit = (
+                questions_module.DEFAULT_RECOMMEND_LIMIT
+                if args.limit is None
+                else args.limit
+            )
+            result = questions_module.recommend_questions(
+                conn, config, student_uid=args.recommend_for, limit=limit
+            )
+            if not result.items:
+                raise config_loader.ConfigError(
+                    "没有可推荐的题目：请确认题库不为空，或换一个学生再试。"
+                )
+            path = exam_module.write_question_handout(
+                config,
+                [item.question for item in result.items],
+                source=f"按推荐组卷（学生 {result.student_name}，难度档 ≤ {result.difficulty_cap}）",
+                anchor=result.student_uid,
+                student_label=f"{result.student_name}（{result.student_uid}）",
+                with_answer=args.with_answer,
+            )
     finally:
         conn.close()
-    print(f"已生成讲评讲义：{path}")
-    print(f"提示：讲义不含试卷原题，题目位置用 {exam_module.SAMPLE_QUESTION_MARKER} 标记占位。")
+
+    print(f"已生成题目讲义：{path}")
+    if args.with_answer:
+        print("提示：讲义已附答案与解析；课堂投影时记得先看一眼再投。")
+    else:
+        print("提示：讲义默认不含答案，需要答案与解析请加 --with-answer。")
+    print("提示：题目内容是使用者数据，请确认你有权使用这些材料。")
     return 0
 
 

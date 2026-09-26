@@ -19,6 +19,7 @@ import exam as exam_module  # noqa: E402
 import hub  # noqa: E402
 import import_scores  # noqa: E402
 import init_db  # noqa: E402
+import questions as questions_module  # noqa: E402
 import seed_demo_data  # noqa: E402
 
 CONFIG_TEXT = """
@@ -372,6 +373,137 @@ class HandoutTests(ExamTestCase):
         )
         self.assertTrue((self.config.paths.output_dir / "handout_e-small.md").is_file())
         self.assertIn("【自制示例题】", out.getvalue())
+
+
+class QuestionHandoutTests(ExamTestCase):
+    """P3.4：题库组卷讲义（按 key / 按推荐），默认不含答案。"""
+
+    def add_questions(self) -> None:
+        conn = init_db.connect(self.config.paths.database)
+        try:
+            with conn:
+                questions_module.insert_question(
+                    conn,
+                    questions_module.Question(
+                        question_key="q-self-1",
+                        qtype="choice",
+                        stem="自制示例题干一",
+                        answer="A",
+                        options=("A. 甲", "B. 乙"),
+                        analysis="示例解析一",
+                        difficulty=2,
+                        source_label="自制示例",
+                        tags=("欧姆定律",),
+                    ),
+                )
+                questions_module.insert_question(
+                    conn,
+                    questions_module.Question(
+                        question_key="q-self-2",
+                        qtype="calculation",
+                        stem="自制示例题干二",
+                        answer="42",
+                        difficulty=4,
+                        source_label="自制示例",
+                        tags=("牛顿第二定律",),
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def handout_files(self) -> list[Path]:
+        out = self.config.paths.output_dir
+        return sorted(out.glob("handout_questions_*.md")) if out.is_dir() else []
+
+    def run_hub(self, *args: str) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = hub.main(["--config", str(self.config_path), *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_keys_mode_hides_answers_by_default(self):
+        self.add_questions()
+
+        code, out, err = self.run_hub(
+            "make-handout", "--question-keys", "q-self-1,q-self-2"
+        )
+
+        self.assertEqual(code, 0, msg=out + err)
+        files = self.handout_files()
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].name, "handout_questions_q-self-1_2道.md")
+        text = files[0].read_text(encoding="utf-8")
+        self.assertIn("# 题目讲义", text)
+        self.assertIn("自制示例题干一", text)
+        self.assertIn("- A. 甲", text, msg="选项属于题面，应当在讲义里")
+        self.assertIn("来源：自制示例", text, msg="自制题应带来源标记")
+        self.assertNotIn("## 答案与解析", text)
+        self.assertNotIn("示例解析一", text, msg="默认不该出现解析")
+        self.assertNotIn("/Users/", text)
+        self.assertNotIn(str(self.base), text)
+
+    def test_with_answer_appends_the_answer_section(self):
+        self.add_questions()
+
+        code, out, err = self.run_hub(
+            "make-handout", "--question-keys", "q-self-1", "--with-answer"
+        )
+
+        self.assertEqual(code, 0, msg=out + err)
+        text = self.handout_files()[0].read_text(encoding="utf-8")
+        self.assertIn("## 答案与解析", text)
+        self.assertIn("示例解析一", text)
+
+    def test_unknown_key_writes_nothing(self):
+        self.add_questions()
+
+        code, _out, err = self.run_hub(
+            "make-handout", "--question-keys", "q-self-1,没有这道题"
+        )
+
+        self.assertEqual(code, 2)
+        self.assertIn("没有这道题", err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(self.handout_files(), [], msg="失败时不该留下半成品")
+
+    def test_modes_are_mutually_exclusive(self):
+        self.add_questions()
+
+        code, _out, err = self.run_hub(
+            "make-handout", "--exam-key", "e-small", "--question-keys", "q-self-1"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("三选一", err)
+
+        code, _out, err = self.run_hub(
+            "make-handout", "--exam-key", "e-small", "--with-answer"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("--with-answer", err)
+
+        code, _out, err = self.run_hub(
+            "make-handout", "--question-keys", "q-self-1", "--limit", "2"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("--limit", err)
+
+    def test_recommend_mode_writes_a_handout(self):
+        self.add_questions()
+        student_uid = self.query(
+            "SELECT student_uid FROM students ORDER BY id LIMIT 1"
+        )[0]["student_uid"]
+
+        code, out, err = self.run_hub(
+            "make-handout", "--recommend-for", str(student_uid), "--limit", "2"
+        )
+
+        self.assertEqual(code, 0, msg=out + err)
+        files = self.handout_files()
+        self.assertEqual(len(files), 1)
+        text = files[0].read_text(encoding="utf-8")
+        self.assertIn("# 题目讲义", text)
+        self.assertIn("推荐对象", text)
+        self.assertNotIn("## 答案与解析", text)
 
 
 class DemoItemTests(ExamTestCase):

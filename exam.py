@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ from typing import Any, Mapping, Sequence
 import config_loader
 import db as db_module
 import importer
+import questions as questions_module
 
 DEFAULT_ITEM_COLUMNS: Mapping[str, str] = {
     "student_uid": "student_uid",
@@ -32,6 +34,8 @@ DEFAULT_ITEM_COLUMNS: Mapping[str, str] = {
 }
 DEFAULT_ITEM_FULL_SCORE = 10.0
 SAMPLE_QUESTION_MARKER = "【自制示例题】"
+# 文件名里不安全的字符（组卷讲义按题目 key / 学生学号命名，可能带中文与符号）
+UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\s]+')
 
 EASY_THRESHOLD = 0.7
 HARD_THRESHOLD = 0.4
@@ -721,4 +725,102 @@ def write_handout(
     path = config.paths.output_dir / f"handout_{exam_key}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_handout(config, analysis), encoding="utf-8")
+    return path
+
+
+def render_question_handout(
+    config: config_loader.AppConfig,
+    items: Sequence[questions_module.Question],
+    *,
+    source: str,
+    student_label: str | None = None,
+    with_answer: bool = False,
+) -> str:
+    """组卷讲义：题目来自使用者题库或自制示例题，结构取自文案表的 [handout] 段。
+
+    默认**不含答案与解析**（课堂投影优先）；`with_answer=True` 才在文末追加一节。
+    讲义只写题目内容与来源，不嵌入任何第三方教材原文。
+    """
+    labels = config.labels
+    lines = [f"# {labels.get('handout.title_questions')}", ""]
+    lines.append(f"- {labels.get('handout.label_source')}：{source}")
+    if student_label:
+        lines.append(f"- {labels.get('handout.label_student')}：{student_label}")
+    lines.append(f"- {labels.get('handout.label_count')}：{len(items)} 道")
+    lines.extend(["", f"> {labels.get('handout.boundary')}"])
+    if not with_answer:
+        lines.append(f"> {labels.get('handout.answers_hidden')}")
+
+    lines.extend(["", f"## {labels.get('handout.section_questions')}", ""])
+    for index, question in enumerate(items, start=1):
+        meta = [questions_module.qtype_label(question.qtype)]
+        difficulty = (
+            labels.get("handout.difficulty_unmarked")
+            if question.difficulty is None
+            else str(question.difficulty)
+        )
+        meta.append(f"{labels.get('handout.label_difficulty')} {difficulty}")
+        if question.tags:
+            meta.append(
+                f"{labels.get('handout.label_tags')}：{'、'.join(question.tags)}"
+            )
+        if question.source_label:
+            meta.append(
+                f"{labels.get('handout.label_source')}：{question.source_label}"
+            )
+        lines.extend([f"### {index}. {question.question_key}（{'｜'.join(meta)}）", ""])
+        lines.append(question.stem)
+        if question.options:
+            lines.append("")
+            lines.extend(f"- {option}" for option in question.options)
+        lines.append("")
+
+    if with_answer:
+        lines.extend([f"## {labels.get('handout.section_answers')}", ""])
+        for index, question in enumerate(items, start=1):
+            lines.append(f"### {index}. {question.question_key}")
+            lines.append("")
+            lines.append(f"- {labels.get('handout.label_answer')}：{question.answer}")
+            if question.analysis:
+                lines.append(
+                    f"- {labels.get('handout.label_analysis')}：{question.analysis}"
+                )
+            lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def safe_filename_part(text: str, *, limit: int = 40) -> str:
+    """把题目 key / 学生学号变成能当文件名的一段；空的话给个兜底名字。"""
+    cleaned = UNSAFE_FILENAME_CHARS.sub("-", str(text).strip()).strip("-")
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit]
+    return cleaned or "unnamed"
+
+
+def write_question_handout(
+    config: config_loader.AppConfig,
+    items: Sequence[questions_module.Question],
+    *,
+    source: str,
+    anchor: str,
+    student_label: str | None = None,
+    with_answer: bool = False,
+) -> Path:
+    """写出组卷讲义；文件名与讲评讲义（`handout_<exam_key>.md`）分开，避免互相覆盖。"""
+    if not items:
+        raise config_loader.ConfigError("没有可组卷的题目：请先确认题库不为空，或放宽筛选条件。")
+    text = render_question_handout(
+        config,
+        items,
+        source=source,
+        student_label=student_label,
+        with_answer=with_answer,
+    )
+    path = (
+        config.paths.output_dir
+        / f"handout_questions_{safe_filename_part(anchor)}_{len(items)}道.md"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
     return path
