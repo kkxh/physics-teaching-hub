@@ -23,7 +23,7 @@
 | 预警与跟进闭环 | `alerts.py`、`hub.py scan-alerts / list-alerts / resolve-alert / alert-stats` | 已搬运 | 2026-09-24 | 规则阈值走 `[alerts]`；扫描幂等（同一学生同一规则只留一条未解决预警）；条件消失不自动关闭，关闭必须写跟进记录（`follow_ups` 记人/时间/说明/结果）；上游写死的阈值与静默自动解决都不搬 |
 | 周报与阶段巡检 | `reports.py`、`hub.py weekly-report / phase-patrol` | 已搬运 | 2026-09-24 | 汇总逻辑从数据库现算（考试/作业/错因/行为/预警），周报按 ISO 周指定且必须落在学期内；阶段巡检含教学进度、阶段、作业覆盖、画像与预警提醒；报告只写相对路径、可分享；上游面向特定班级的文案改成配置与 labels |
 | 考试链路（分析 / 讲评 / 讲义） | `exam.py`、`hub.py import-item-scores / exam-analysis / make-handout` | 已搬运 | 2026-09-25 | 小题级分析（得分率/难度分档/高低分组区分度）+ 讲评顺序建议 + 讲义；**示例题自制**：讲义不放任何试卷原题，题面位置用「自制示例题」标记占位；难度与区分度口径写进报告与文档 |
-| 题库（导入 / 检索 / 推荐） | `schema/questions.sql`、`schema/migrations/0001_questions.sql`、`questions.py`、`examples/` | 进行中 | 2026-09-26 | P3.0：表结构（题干/选项/答案/解析/难度/知识点标签）+ 数据层原语 + `hub.py upgrade-db` 非破坏式升级（`phase2` 库跑迁移、不删库）。P3.1：`import-questions`（JSON / CSV / `--demo`，dry-run 与执行同条件、整批单事务、标签白名单）+ 12 道自制示例题（顶层 `examples/`，演示数据集升到 `demo.v7`，维护者已复核物理正确性）。P3.2：`list-questions`（标签/题型/难度/关键词过滤，答案默认隐藏）+ 只读 `GET /api/questions`。P3.3：`recommend-questions`（错因标签经 `[question_bank.tag_map]` 映射到知识点 × 画像难度档，带可解释理由，纯只读；无数据退化为难度档通用推荐）+ 只读 `GET /api/questions/recommend`。P3.4：`make-handout` 新增 `--question-keys` / `--recommend-for` 组卷模式（与 `--exam-key` 互斥、默认不含答案、文件名与讲评讲义分开），讲义结构走 labels 的 `[handout]` 段。收口（P3.5 + R4 评审）待做；上游的整卷解析与图片题不搬，题目内容本身永不入仓 |
+| 题库（导入 / 检索 / 推荐） | `schema/questions.sql`、`schema/migrations/0001_questions.sql`、`questions.py`、`examples/` | 已搬运 | 2026-09-26 | P3.0：表结构（题干/选项/答案/解析/难度/知识点标签）+ 数据层原语 + `hub.py upgrade-db` 非破坏式升级（`phase2` 库跑迁移、不删库）。P3.1：`import-questions`（JSON / CSV / `--demo`，dry-run 与执行同条件、整批单事务、标签白名单）+ 12 道自制示例题（顶层 `examples/`，演示数据集升到 `demo.v7`，维护者已复核物理正确性）。P3.2：`list-questions`（标签/题型/难度/关键词过滤，答案默认隐藏）+ 只读 `GET /api/questions`。P3.3：`recommend-questions`（错因标签经 `[question_bank.tag_map]` 映射到知识点 × 画像难度档，带可解释理由，纯只读；无数据退化为难度档通用推荐）+ 只读 `GET /api/questions/recommend`。P3.4：`make-handout` 的 `--question-keys` / `--recommend-for` 组卷模式（与 `--exam-key` 互斥、默认不含答案、文件名与讲评讲义分开），讲义结构走 labels 的 `[handout]` 段。**与上游的差异（为什么不一样）**：只搬题目框架，不搬上游的整卷解析与图片题；题目内容永不入仓（示例题自制、用户题库只在本机），检索与推荐接口不回答案，推荐保持只读且带可解释理由——内容隔离是本仓库新增的硬约束 |
 | 本地看板前端 | `dashboard.py`、`hub.py make-dashboard` | 已搬运 | 2026-09-25 | 构建时把数据嵌进 `outputs/dashboard/index.html`（另存一份 data.json），双击即可离线看；无 CDN、无外部请求；页面文字全部取自 `labels` 的 `[dashboard]` 段；空值统一显示占位符、排序跳过 null；上游依赖运行时 API 与前端资源，这里改成单文件静态站 |
 | 本地 API | `api.py`、`hub.py serve` | 已搬运 | 2026-09-25 | 只读 GET；只绑 `127.0.0.1`、默认端口 8420；CORS 只回固定本机 Origin 并带 `Vary: Origin`，无通配符；错误统一 JSON 体 + 404/400/405；标准库 `http.server`，不引框架；上游的 CORS 通配符与写接口都不搬 |
 
@@ -33,9 +33,10 @@ Phase 1（通用化地基）已于 2026-09-23 收口：配置、路径与时间�
 Phase 2（逐模块搬运）已于 2026-09-25 收口：台账里除题库（属 Phase 3）外全部为「已搬运」；
 R1（P2.0 地基）、R2（P2.4/P2.5 写入与闭环）、R3（全量收口）三次评审发现的问题都已修复并补了回归测试。
 
-Phase 3（题库与教材隔离）正在进行：P3.0（2026-09-26）把 schema 版本升到 `phase3`，
-`phase2` 存量库用 `python3 hub.py upgrade-db` 非破坏式升级（只跑迁移，不删库、不导入演示数据）；
-`phase1-temp` 与未知版本仍然要求重建。
+Phase 3（题库与教材隔离）已于 2026-09-26 收口：P3.0 把 schema 版本升到 `phase3`，
+`phase2` 存量库用 `python3 hub.py upgrade-db` 非破坏式升级（只跑迁移，不删库、不导入演示数据），
+`phase1-temp` 与未知版本仍然要求重建；P3.1～P3.5 落地题库导入、检索、推荐、组卷讲义与收口自查。
+R4 异步评审（静态）结论为「无阻塞项」，1 个观察项（推荐池为档位 +1）已按计划原意定稿并补了用例。
 
 发布前硬性待办仍留在 [ROADMAP.md](ROADMAP.md)：补依赖许可清单、对全部历史做一次隐私扫描——按计划在 Phase 4 发布前执行。
 

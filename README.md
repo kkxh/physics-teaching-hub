@@ -2,7 +2,7 @@
 
 面向中学物理教师的本地教学数据中枢：把课堂记录、作业与订正、错因、学生画像、阶段巡检和练习推荐放进同一个本地数据库，由命令行与本地看板驱动，数据不出本机。
 
-> **当前状态：v0.0.1，Phase 2（逐模块搬运）已完成。**
+> **当前状态：v0.0.1，Phase 3（题库与教材隔离）已完成。**
 > 本仓库是作者私有教学系统的开源精简版，正在按 [docs/ROADMAP.md](docs/ROADMAP.md) 逐步搬运通用能力。
 > 功能会**长期落后于**内部版本，这是预期状态，不是缺陷；接口也会随搬运调整。
 
@@ -10,7 +10,7 @@
 
 ## 现在能做什么
 
-Phase 1 的通用化地基 + Phase 2 的模块搬运都已经落地，全部使用虚构演示数据：
+Phase 1 的通用化地基 + Phase 2 的模块搬运 + Phase 3 的题库框架都已经落地，全部使用虚构演示数据：
 
 - **配置外置**：学段、学科、学期、课表、班级、数据库路径都由 `config.toml` 决定，见下方「配置」。
 - **文案外置**：学科名、学段名、阶段名、常用术语与演示提示语都放在 `labels/zh-CN.toml`，代码里只出现 key，见下方「文案」。
@@ -20,6 +20,8 @@ Phase 1 的通用化地基 + Phase 2 的模块搬运都已经落地，全部使�
 - **记录**：错因（标签字典可扩展）与行为记录；写操作走「预览 → `--yes` → 单事务」。
 - **分析**：学生画像（成绩水平/作业习惯/错因控制 + 综合分，支持增量重算）、作业完成率（转班学生不吃亏的口径）、考试逐题分析（得分率/难度/区分度）。
 - **输出**：周报、阶段巡检、考试分析、讲评讲义（不含试卷原题）、可离线双击打开的本地看板。
+- **题库**：题目（题型/题干/选项/答案/解析/难度/知识点标签）支持 JSON / CSV / 仓库自制示例题三种导入方式；按标签、题型、难度、关键词检索；按错因标签 × 画像难度档给出带理由的推荐；可按 key 或按推荐组卷成题目讲义（默认不含答案）。**题目是使用者数据**：仓库只带 12 道自制示例题，题库本身只存在本机。
+- **升级**：`hub.py upgrade-db` 把存量 `phase2` 库非破坏式升到当前 schema（只跑迁移，不删库）。
 - **本地 API**：只读 GET、只绑 `127.0.0.1`、CORS 白名单，见下方。
 - **隐私扫描**：`scripts/privacy_scan.sh` 在提交前拦住真实数据、绝对路径与凭据痕迹。
 - **持续集成**：GitHub Actions 跑测试、演示数据自检与隐私扫描。
@@ -90,6 +92,12 @@ python3 hub.py make-dashboard                         # 生成可离线双击打
 python3 hub.py import-homework --csv 作业.csv --assign-key hw-01 \
     --class 高一(A)班 --topic "运动学图像" --assigned-date 2026-09-30   # 作业提交导入
 python3 hub.py import-item-scores --csv 小题得分.csv --exam-key demo-exam-1  # 小题得分导入
+python3 hub.py import-questions --demo                          # 导入仓库自带的 12 道自制示例题
+python3 hub.py import-questions --json 题库.json --dry-run      # 预览导入自己的题库（JSON / CSV）
+python3 hub.py list-questions --tag 欧姆定律 --limit 5           # 检索题目（答案默认隐藏，--show-answer 才显示）
+python3 hub.py recommend-questions --student 高一(A)班-01        # 按错因与画像推荐题目（只读）
+python3 hub.py make-handout --recommend-for 高一(A)班-01         # 按推荐组卷成题目讲义
+python3 hub.py upgrade-db                                      # 存量 phase2 库非破坏式升级
 python3 hub.py list-alerts --status open              # 列出预警
 python3 hub.py alert-stats                            # 预警统计
 ```

@@ -696,6 +696,23 @@ class RecommendationTests(unittest.TestCase):
         self.assertEqual(self.keys(result), ["q-hard"])
         self.assertTrue([note for note in result.notes if "放宽难度限制" in note])
 
+    def test_challenge_tier_is_allowed_but_ranked_below_the_band(self):
+        """档位 + 1 的题算挑战题：可以入选，但排在档内题后面（R4 观察项定稿口径）。"""
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "graph_reading", 1)
+        self.set_profile(student_id, overall=85.0)
+        self.add_question("q-in-band", tags=("运动学图像",), difficulty=3)
+        self.add_question("q-challenge", tags=("运动学图像",), difficulty=5)
+
+        result = questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+
+        self.assertEqual(result.difficulty_cap, 4)
+        self.assertEqual(self.keys(result), ["q-in-band", "q-challenge"])
+        challenge = result.items[1]
+        self.assertIn("略高于当前档位", "；".join(challenge.reasons))
+        in_band = result.items[0]
+        self.assertIn("在能力档内", "；".join(in_band.reasons))
+
     def test_student_without_profile_uses_the_default_cap(self):
         student_id = self.add_student("s-01")
         self.add_errors(student_id, "graph_reading", 1)
