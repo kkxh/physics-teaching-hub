@@ -32,7 +32,12 @@ EXAMPLE_TAGS = (
 )
 
 
-def make_config(base: Path, *, tags: Sequence[str] | None = EXAMPLE_TAGS) -> config_loader.AppConfig:
+def make_config(
+    base: Path,
+    *,
+    tags: Sequence[str] | None = EXAMPLE_TAGS,
+    tag_map: dict[str, list[str]] | None = None,
+) -> config_loader.AppConfig:
     raw: dict[str, Any] = {
         "semester": {"starts_on": "2026-09-01", "ends_on": "2027-01-22"},
         "paths": {"database": "data/q.db", "output_dir": "out"},
@@ -40,7 +45,10 @@ def make_config(base: Path, *, tags: Sequence[str] | None = EXAMPLE_TAGS) -> con
         "demo": {"students_per_class": 3},
     }
     if tags is not None:
-        raw["question_bank"] = {"tags": list(tags)}
+        section: dict[str, Any] = {"tags": list(tags)}
+        if tag_map:
+            section["tag_map"] = tag_map
+        raw["question_bank"] = section
     return config_loader.parse_config(raw, base_dir=base)
 
 
@@ -565,6 +573,226 @@ class QuestionSearchTests(unittest.TestCase):
         table = questions.format_questions([item], stem_length=4)
 
         self.assertIn("求串联电…", table)
+
+
+class RecommendationTests(unittest.TestCase):
+    """P3.3 推荐：标签命中、难度档、退化路径与只读性。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name)
+        self.config = make_config(
+            self.base,
+            tag_map={
+                "graph_reading": ["运动学图像"],
+                "calculation": ["欧姆定律"],
+            },
+        )
+        config_loader.ensure_directories(self.config)
+        self.conn = init_db.connect(self.config.paths.database)
+        self.addCleanup(self.conn.close)
+        init_db.apply_schema(self.conn)
+
+        with self.conn:
+            self.conn.execute("INSERT INTO classes (name) VALUES ('高一(A)班')")
+            self.conn.execute(
+                "INSERT INTO homework_assignments (assign_key, class_id, topic, assigned_date) "
+                "VALUES ('hw-01', 1, '演示作业', '2026-09-30')"
+            )
+            for index, code in enumerate(("graph_reading", "calculation"), start=1):
+                self.conn.execute(
+                    "INSERT INTO error_tags (code, label) VALUES (?, ?)",
+                    (code, f"标签{index}"),
+                )
+
+    def add_student(self, uid: str, name: str = "学生01") -> int:
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO students (student_uid, name, class_id) VALUES (?, ?, 1)",
+                (uid, name),
+            )
+        return int(cursor.lastrowid)
+
+    def add_errors(self, student_id: int, code: str, times: int) -> None:
+        tag_id = self.conn.execute(
+            "SELECT id FROM error_tags WHERE code = ?", (code,)
+        ).fetchone()["id"]
+        with self.conn:
+            for _ in range(times):
+                self.conn.execute(
+                    "INSERT INTO error_records (student_id, assignment_id, tag_id, recorded_at) "
+                    "VALUES (?, 1, ?, '2026-10-01')",
+                    (student_id, int(tag_id)),
+                )
+
+    def set_profile(self, student_id: int, **dimensions: float) -> None:
+        with self.conn:
+            for dimension, score in dimensions.items():
+                self.conn.execute(
+                    "INSERT INTO ability_scores (student_id, dimension, score) VALUES (?, ?, ?)",
+                    (student_id, dimension, score),
+                )
+
+    def add_question(
+        self,
+        key: str,
+        *,
+        tags: tuple[str, ...],
+        difficulty: int | None = 2,
+    ) -> None:
+        with self.conn:
+            questions.insert_question(
+                self.conn,
+                questions.Question(
+                    question_key=key,
+                    qtype="fill",
+                    stem=f"{key} 的题干",
+                    answer=f"{key} 的答案",
+                    difficulty=difficulty,
+                    tags=tags,
+                ),
+            )
+
+    def keys(self, result: questions.RecommendationResult) -> list[str]:
+        return [item.question.question_key for item in result.items]
+
+    def test_recommends_tag_matched_questions_first(self):
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "graph_reading", 2)
+        self.set_profile(student_id, overall=75.0, error_control=58.0)
+        self.add_question("q-kinematics", tags=("运动学图像",), difficulty=2)
+        self.add_question("q-ohm", tags=("欧姆定律",), difficulty=2)
+
+        result = questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+
+        self.assertEqual(self.keys(result)[0], "q-kinematics")
+        self.assertEqual(dict(result.tag_hits), {"运动学图像": 2})
+        first = result.items[0]
+        self.assertIn("标签1", "；".join(first.reasons))
+        self.assertIn("运动学图像", "；".join(first.reasons))
+
+    def test_difficulty_cap_comes_from_the_profile(self):
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "graph_reading", 1)
+        self.set_profile(student_id, overall=45.0, error_control=80.0)
+        self.add_question("q-easy", tags=("运动学图像",), difficulty=1)
+        self.add_question("q-hard", tags=("运动学图像",), difficulty=5)
+
+        result = questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+
+        self.assertEqual(result.difficulty_cap, 2)
+        self.assertEqual(self.keys(result), ["q-easy"], msg="难度 5 超出档位 +1，应被过滤")
+        self.assertFalse([note for note in result.notes if "放宽" in note])
+
+    def test_only_hard_questions_fall_back_with_a_note(self):
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "graph_reading", 1)
+        self.set_profile(student_id, overall=45.0)
+        self.add_question("q-hard", tags=("运动学图像",), difficulty=5)
+
+        result = questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+
+        self.assertEqual(self.keys(result), ["q-hard"])
+        self.assertTrue([note for note in result.notes if "放宽难度限制" in note])
+
+    def test_student_without_profile_uses_the_default_cap(self):
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "graph_reading", 1)
+        self.add_question("q-mid", tags=("运动学图像",), difficulty=3)
+
+        result = questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+
+        self.assertEqual(result.difficulty_cap, 3)
+        self.assertTrue([note for note in result.notes if "难度档按默认" in note])
+
+    def test_missing_error_data_degrades_with_a_note(self):
+        self.add_student("s-01")
+        self.add_question("q-mid", tags=("运动学图像",), difficulty=2)
+        self.add_question("q-other", tags=("欧姆定律",), difficulty=2)
+
+        result = questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+
+        self.assertTrue(
+            [note for note in result.notes if "还没有错因记录" in note],
+            msg=f"应明示退化路径：{result.notes}",
+        )
+        self.assertEqual(self.keys(result), ["q-mid", "q-other"])
+        self.assertEqual(dict(result.tag_hits), {})
+
+    def test_unmapped_error_tags_are_skipped_with_a_note(self):
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "calculation", 0)  # 先建一个无映射的场景
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO error_tags (code, label) VALUES ('concept_confusion', '标签3')"
+            )
+        self.add_errors(student_id, "concept_confusion", 2)
+        self.add_question("q-ohm", tags=("欧姆定律",), difficulty=2)
+
+        result = questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+
+        self.assertTrue(
+            [note for note in result.notes if "还没有映射到知识点" in note and "标签3" in note]
+        )
+        self.assertEqual(dict(result.tag_hits), {})
+        self.assertEqual(self.keys(result), ["q-ohm"])
+
+    def test_unknown_student_is_rejected(self):
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            questions.recommend_questions(self.conn, self.config, student_uid="没有这个学号")
+
+        self.assertIn("找不到学生", str(ctx.exception))
+
+    def test_limit_is_respected_and_validated(self):
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "graph_reading", 1)
+        for index in range(1, 4):
+            self.add_question(f"q-{index}", tags=("运动学图像",), difficulty=2)
+
+        self.assertEqual(
+            len(questions.recommend_questions(self.conn, self.config, student_uid="s-01", limit=2).items),
+            2,
+        )
+        for bad in (0, questions.MAX_LIST_LIMIT + 1):
+            with self.subTest(limit=bad):
+                with self.assertRaises(config_loader.ConfigError):
+                    questions.recommend_questions(
+                        self.conn, self.config, student_uid="s-01", limit=bad
+                    )
+
+    def test_recommendation_is_read_only(self):
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "graph_reading", 3)
+        self.set_profile(student_id, overall=70.0, error_control=50.0)
+        self.add_question("q-kinematics", tags=("运动学图像",), difficulty=2)
+
+        def snapshot() -> tuple[tuple[str, int], ...]:
+            return tuple(
+                (table, int(self.conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]))
+                for table in ("questions", "question_tags", "error_records", "ability_scores")
+            )
+
+        before = snapshot()
+        questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+        after = snapshot()
+
+        self.assertEqual(before, after, msg="推荐必须只读")
+
+    def test_format_hides_answers_by_default(self):
+        student_id = self.add_student("s-01")
+        self.add_errors(student_id, "graph_reading", 1)
+        self.add_question("q-kinematics", tags=("运动学图像",), difficulty=2)
+
+        result = questions.recommend_questions(self.conn, self.config, student_uid="s-01")
+
+        hidden = questions.format_recommendations(result)
+        shown = questions.format_recommendations(result, show_answer=True)
+
+        self.assertIn("推荐理由", hidden)
+        self.assertNotIn("| 答案 |", hidden)
+        self.assertIn("q-kinematics", hidden)
+        self.assertIn("| 答案 | 解析 |", shown)
 
 
 class ExampleQuestionSetTests(unittest.TestCase):

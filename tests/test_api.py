@@ -45,6 +45,10 @@ students_per_class = 3
 
 [question_bank]
 tags = ["运动学图像", "匀变速直线运动", "牛顿第二定律", "受力分析", "机械能守恒", "欧姆定律", "串并联电路", "实验数据处理"]
+
+[question_bank.tag_map]
+graph_reading = ["运动学图像", "实验数据处理"]
+calculation = ["匀变速直线运动", "欧姆定律"]
 """
 
 
@@ -230,6 +234,50 @@ class QuestionDispatchTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status, HTTPStatus.NOT_FOUND)
 
+    def test_recommend_returns_items_with_reasons(self):
+        payload = api_module.dispatch(
+            self.config,
+            self.conn,
+            "/api/questions/recommend",
+            {"student_uid": ["高一(A)班-01"], "limit": ["3"]},
+        )
+
+        self.assertGreaterEqual(payload["count"], 1)
+        self.assertLessEqual(payload["count"], 3)
+        self.assertEqual(payload["student_uid"], "高一(A)班-01")
+        self.assertIsInstance(payload["difficulty_cap"], int)
+        self.assertTrue(payload["notes"])
+        for item in payload["items"]:
+            with self.subTest(question=item["question_key"]):
+                self.assertTrue(item["reasons"])
+                self.assertNotIn("answer", item)
+                self.assertNotIn("analysis", item)
+
+    def test_recommend_requires_a_student_and_validates_limit(self):
+        with self.assertRaises(api_module.ApiError) as missing_ctx:
+            api_module.dispatch(self.config, self.conn, "/api/questions/recommend", {})
+        self.assertEqual(missing_ctx.exception.status, HTTPStatus.BAD_REQUEST)
+
+        with self.assertRaises(api_module.ApiError) as limit_ctx:
+            api_module.dispatch(
+                self.config,
+                self.conn,
+                "/api/questions/recommend",
+                {"student_uid": ["高一(A)班-01"], "limit": ["0"]},
+            )
+        self.assertEqual(limit_ctx.exception.status, HTTPStatus.BAD_REQUEST)
+
+    def test_recommend_unknown_student_is_404(self):
+        with self.assertRaises(api_module.ApiError) as ctx:
+            api_module.dispatch(
+                self.config,
+                self.conn,
+                "/api/questions/recommend",
+                {"student_uid": ["没有这个学号"]},
+            )
+
+        self.assertEqual(ctx.exception.status, HTTPStatus.NOT_FOUND)
+
 
 class QuestionEndpointTests(ApiTestCase):
     """走真实 HTTP 的题库端点（沙箱不允许绑端口时会跳过，CI 上会跑）。"""
@@ -255,6 +303,26 @@ class QuestionEndpointTests(ApiTestCase):
         bad_status, _headers, bad_payload = self.request("/api/questions?difficulty=9")
         self.assertEqual(bad_status, 400)
         self.assertIn("error", bad_payload)
+
+    def test_recommend_endpoint(self):
+        student_uid = urllib.parse.quote("高一(A)班-01")
+
+        status, _headers, payload = self.request(
+            f"/api/questions/recommend?student_uid={student_uid}&limit=2"
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["items"])
+        self.assertNotIn("answer", payload["items"][0])
+
+        missing_status, _headers, missing = self.request("/api/questions/recommend")
+        self.assertEqual(missing_status, 400)
+        self.assertIn("error", missing)
+
+        unknown_status, _headers, unknown = self.request(
+            "/api/questions/recommend?student_uid=%E6%B2%A1%E6%9C%89%E8%BF%99%E4%B8%AA%E5%AD%A6%E5%8F%B7"
+        )
+        self.assertEqual(unknown_status, 404)
+        self.assertIn("error", unknown)
 
 
 class ErrorTests(ApiTestCase):

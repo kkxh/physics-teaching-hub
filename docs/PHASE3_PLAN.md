@@ -3,8 +3,8 @@
 > 状态：**已定稿（2026-09-26）**——维护者已确认三处决策：升级路径走「真迁移」（决策一 A）、
 > 自制示例题放顶层 `examples/`（决策二 A）、示例题由执行者起草、维护者审物理正确性（决策三 A）；
 > 评审保持单点 R4。Phase 2 已于 2026-09-25 收口（P2.0～P2.10 全部落地，R1/R2/R3 已闭环）；
-> P3.0～P3.2 已于 2026-09-26 落地（题库 schema + 数据层 + 非破坏式升级链路；
-> 导入器 + 自制示例题集，演示数据集升到 `demo.v7`；检索 CLI 与只读 API）。
+> P3.0～P3.3 已于 2026-09-26 落地（题库 schema + 数据层 + 非破坏式升级链路；
+> 导入器 + 自制示例题集，演示数据集升到 `demo.v7`；检索与推荐的 CLI 与只读 API）。
 > 示例题已于 2026-09-26 经维护者人工核对
 > 物理正确性通过（决策三 A 闭环），见修订记录第 11 条。
 > 范围锚点：[ROADMAP.md](ROADMAP.md) 的 Phase 3。本文件只细化步骤，不扩大范围；
@@ -248,7 +248,7 @@ questions.sql: questions(id, question_key TEXT UNIQUE NOT NULL, qtype TEXT NOT N
 
 ---
 
-## 5. P3.3 推荐接口
+## 5. P3.3 推荐接口（已完成 2026-09-26）
 
 - CLI：`hub.py recommend-questions --student UID [--limit N]`。
 - 推荐逻辑（规则推荐，纯函数便于测试）：
@@ -348,7 +348,7 @@ python3 hub.py upgrade-db                                             # 存量 p
 python3 hub.py import-questions (--json JSON文件 | --csv CSV文件) [--dry-run]
 python3 hub.py import-questions --demo
 python3 hub.py list-questions [--tag 标签] [--type 题型] [--difficulty 1-5] [--keyword 关键词] [--limit N] [--show-answer]
-python3 hub.py recommend-questions --student 学生UID [--limit N]
+python3 hub.py recommend-questions --student 学生UID [--limit N] [--show-answer]
 python3 hub.py make-handout --exam-key 考试标识                       # Phase 2 已有
 python3 hub.py make-handout --question-keys k1,k2 [--with-answer]      # 新增
 python3 hub.py make-handout --recommend-for 学生UID [--limit N]        # 新增

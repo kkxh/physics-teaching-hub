@@ -28,6 +28,7 @@ import config_loader
 import db as db_module
 import exam as exam_module
 import homework as homework_module
+import importer
 import questions as questions_module
 import teaching_calendar
 
@@ -59,6 +60,7 @@ ROUTES: tuple[Route, ...] = (
     Route(re.compile(r"^/api/homework/stats$"), "homework_stats"),
     Route(re.compile(r"^/api/alerts$"), "alerts"),
     Route(re.compile(r"^/api/questions$"), "questions"),
+    Route(re.compile(r"^/api/questions/recommend$"), "question_recommend"),
 )
 
 
@@ -271,6 +273,53 @@ def build_questions(
     }
 
 
+def build_question_recommendations(
+    config: config_loader.AppConfig,
+    conn: sqlite3.Connection,
+    query: Mapping[str, list[str]],
+) -> dict[str, Any]:
+    """按错因与画像推荐题目（只读，不回答案与解析）。
+
+    学生不存在是 404（资源找不到），参数不对是 400。
+    """
+    student_uid = (query.get("student_uid") or [None])[0]
+    student_uid = "" if student_uid is None else str(student_uid).strip()
+    if not student_uid:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "缺少 student_uid 参数（学生学号）")
+
+    limit = _query_int(query, "limit")
+    try:
+        importer.resolve_student(conn, student_uid=student_uid)
+    except config_loader.ConfigError as exc:
+        raise ApiError(HTTPStatus.NOT_FOUND, str(exc)) from exc
+
+    try:
+        result = questions_module.recommend_questions(
+            conn,
+            config,
+            student_uid=student_uid,
+            limit=questions_module.DEFAULT_RECOMMEND_LIMIT if limit is None else limit,
+        )
+    except config_loader.ConfigError as exc:
+        raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+
+    items = []
+    for item in result.items:
+        payload = questions_module.as_public_dict(item.question)
+        payload["reasons"] = list(item.reasons)
+        items.append(payload)
+    return {
+        "student_uid": result.student_uid,
+        "student_name": result.student_name,
+        "class_name": result.class_name,
+        "difficulty_cap": result.difficulty_cap,
+        "tag_hits": dict(result.tag_hits),
+        "notes": list(result.notes),
+        "count": len(items),
+        "items": items,
+    }
+
+
 def dispatch(
     config: config_loader.AppConfig,
     conn: sqlite3.Connection,
@@ -303,6 +352,8 @@ def dispatch(
             return build_alerts(conn, status)
         if route.handler == "questions":
             return build_questions(conn, query)
+        if route.handler == "question_recommend":
+            return build_question_recommendations(config, conn, query)
 
     raise ApiError(HTTPStatus.NOT_FOUND, f"没有这个接口：{path}")
 

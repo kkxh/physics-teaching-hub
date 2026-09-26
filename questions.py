@@ -45,8 +45,12 @@ QTYPE_LABELS: Mapping[str, str] = {
 # 检索一次最多返回多少道（防止把整库拉进终端）
 DEFAULT_LIST_LIMIT = 20
 MAX_LIST_LIMIT = 200
+# 推荐默认返回几道
+DEFAULT_RECOMMEND_LIMIT = 5
 # 列表里的题干摘要长度
 STEM_EXCERPT_LENGTH = 60
+# 画像维度分低于这个值算「弱项」
+WEAK_DIMENSION_THRESHOLD = 60.0
 
 # 题目导入的 CSV 表头约定（可用 --columns 覆盖）
 DEFAULT_QUESTION_COLUMNS: Mapping[str, str] = {
@@ -264,12 +268,7 @@ def search_questions(
         raise config_loader.ConfigError(
             f"难度只能是 {DIFFICULTY_MIN}-{DIFFICULTY_MAX}；收到：{difficulty!r}。"
         )
-    if limit is None or int(limit) < 1:
-        raise config_loader.ConfigError("返回条数至少为 1。")
-    if int(limit) > MAX_LIST_LIMIT:
-        raise config_loader.ConfigError(
-            f"返回条数最多 {MAX_LIST_LIMIT}；一次别取太多，可以缩小筛选条件。"
-        )
+    limit = _validate_limit(limit)
 
     conditions: list[str] = []
     params: list[Any] = []
@@ -300,6 +299,251 @@ def search_questions(
         (*params, int(limit)),
     ).fetchall()
     return [_row_to_question(conn, row) for row in rows]
+
+
+def list_questions(
+    conn: sqlite3.Connection,
+    *,
+    max_difficulty: int | None = None,
+) -> list[Question]:
+    """按 key 顺序取题；给了 `max_difficulty` 就只看难度不超过它的题（未标难度的仍算在内）。"""
+    if max_difficulty is None:
+        rows = conn.execute(
+            f"SELECT {_QUESTION_COLUMNS} FROM questions ORDER BY question_key"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"SELECT {_QUESTION_COLUMNS} FROM questions "
+            "WHERE difficulty IS NULL OR difficulty <= ? ORDER BY question_key",
+            (int(max_difficulty),),
+        ).fetchall()
+    return [_row_to_question(conn, row) for row in rows]
+
+
+@dataclass(frozen=True)
+class Recommendation:
+    """一道推荐题 + 得分 + 可解释的理由。"""
+
+    question: Question
+    score: float
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RecommendationResult:
+    """一次推荐的结果：学生信息、难度档、命中的知识点、说明与题目。"""
+
+    student_uid: str
+    student_name: str
+    class_name: str
+    difficulty_cap: int
+    tag_hits: Mapping[str, int]
+    notes: tuple[str, ...]
+    items: tuple[Recommendation, ...]
+
+
+def stored_profile(conn: sqlite3.Connection, student_id: int) -> dict[str, float]:
+    """读该学生已落库的画像分（含 overall）；没算过画像就是空字典。"""
+    rows = conn.execute(
+        "SELECT dimension, score FROM ability_scores WHERE student_id = ?",
+        (int(student_id),),
+    ).fetchall()
+    return {str(row["dimension"]): float(row["score"]) for row in rows}
+
+
+def difficulty_cap_for_profile(profile: Mapping[str, float]) -> int:
+    """画像综合分 → 难度档上限；没有画像时按 3（不猜，也不把「没数据」当差数据）。"""
+    overall = profile.get("overall")
+    if overall is None:
+        return 3
+    if overall < 60:
+        return 2
+    if overall < 80:
+        return 3
+    return 4
+
+
+def error_tag_hits(
+    conn: sqlite3.Connection,
+    student_id: int,
+) -> list[tuple[str, str, int]]:
+    """该学生的错因标签分布：[(代码, 显示名, 次数)]，按次数倒序。"""
+    rows = conn.execute(
+        """
+        SELECT t.code AS code, t.label AS label, COUNT(*) AS hits
+        FROM error_records er
+        JOIN error_tags t ON t.id = er.tag_id
+        WHERE er.student_id = ?
+        GROUP BY t.id
+        ORDER BY hits DESC, t.code
+        """,
+        (int(student_id),),
+    ).fetchall()
+    return [(str(row["code"]), str(row["label"]), int(row["hits"])) for row in rows]
+
+
+def recommend_questions(
+    conn: sqlite3.Connection,
+    config: config_loader.AppConfig,
+    *,
+    student_uid: str,
+    limit: int = DEFAULT_RECOMMEND_LIMIT,
+) -> RecommendationResult:
+    """按错因标签 + 画像难度档推荐题目（纯只读，不写库）。
+
+    排序是「知识点命中数 × 难度适配」，每条推荐都带可解释理由；
+    没有错因数据、或错因标签还没配映射时，退化成按难度档的通用推荐并明示
+    （NOTES 第 13 条：没有数据 ≠ 差数据）。
+    """
+    _validate_limit(limit)
+    student = importer.resolve_student(conn, student_uid=student_uid)
+    student_id = int(student["id"])
+
+    profile = stored_profile(conn, student_id)
+    cap = difficulty_cap_for_profile(profile)
+    error_control_weak = (
+        profile.get("error_control") is not None
+        and profile["error_control"] < WEAK_DIMENSION_THRESHOLD
+    )
+
+    # 错因标签 → 知识点标签（走配置里的显式映射，不做隐式耦合）
+    tag_hits: dict[str, int] = {}
+    tag_sources: dict[str, list[tuple[str, int]]] = {}
+    unmatched: list[str] = []
+    hits_rows = error_tag_hits(conn, student_id)
+    for code, label, hits in hits_rows:
+        mapped = config.question_bank.tag_map.get(code) or ()
+        if not mapped:
+            unmatched.append(label)
+            continue
+        for tag in mapped:
+            tag_hits[tag] = tag_hits.get(tag, 0) + hits
+            tag_sources.setdefault(tag, []).append((label, hits))
+
+    notes: list[str] = []
+    overall = profile.get("overall")
+    if not hits_rows:
+        notes.append(
+            "该学生还没有错因记录：按难度档返回通用推荐（没有数据不等于不需要练习）。"
+        )
+    elif unmatched:
+        notes.append(
+            f"这些错因标签还没有映射到知识点，已跳过：{'、'.join(unmatched)}"
+            "（可在 config.toml 的 [question_bank.tag_map] 里补）。"
+        )
+    if overall is None:
+        notes.append(f"还没有画像数据：难度档按默认 ≤ {cap}。")
+    else:
+        notes.append(f"画像综合分 {overall:.1f} → 难度档 ≤ {cap}。")
+    if error_control_weak and tag_hits:
+        notes.append("画像显示错因控制偏弱：错因标签命中的题目优先。")
+
+    pool = list_questions(conn, max_difficulty=cap + 1)
+    if not pool:
+        pool = list_questions(conn)
+        if pool:
+            notes.append(
+                f"题库里没有难度 ≤ {cap + 1} 的题目，已放宽难度限制。"
+            )
+    if not pool:
+        notes.append("题库为空：先跑 python3 hub.py import-questions --demo 或导入你自己的题库。")
+
+    scored: list[Recommendation] = []
+    for question in pool:
+        matched = sorted(
+            (
+                (tag, source)
+                for tag in question.tags
+                for source in tag_sources.get(tag, ())
+            ),
+            key=lambda item: (-item[1][1], item[0], item[1][0]),
+        )
+        hits = sum(source[1] for _tag, source in matched)
+
+        reasons = [
+            f"命中错因标签「{label}」{count} 次（知识点「{tag}」）"
+            for tag, (label, count) in matched
+        ]
+        bonus = 0
+        if question.difficulty is None:
+            reasons.append("这道题未标难度，只按标签命中排序")
+        elif question.difficulty <= cap:
+            bonus += 2
+            reasons.append(f"难度 {question.difficulty} 在能力档内（≤ {cap}）")
+        else:
+            reasons.append(f"难度 {question.difficulty} 略高于当前档位（> {cap}）")
+        if error_control_weak and hits:
+            bonus += 2
+            reasons.append("画像显示错因控制偏弱，优先按错因标签选")
+
+        scored.append(
+            Recommendation(
+                question=question,
+                score=10.0 * hits + bonus,
+                reasons=tuple(reasons),
+            )
+        )
+
+    scored.sort(key=lambda item: (-item.score, item.question.question_key))
+    return RecommendationResult(
+        student_uid=str(student["student_uid"]),
+        student_name=str(student["name"]),
+        class_name=str(student["class_name"]),
+        difficulty_cap=cap,
+        tag_hits=tag_hits,
+        notes=tuple(notes),
+        items=tuple(scored[: int(limit)]),
+    )
+
+
+def format_recommendations(
+    result: RecommendationResult,
+    *,
+    show_answer: bool = False,
+    stem_length: int = STEM_EXCERPT_LENGTH,
+) -> str:
+    """把推荐结果排成 Markdown：先写学生与难度档，再列表（含推荐理由）。"""
+    lines = [
+        f"- 学生：{result.student_name}（{result.student_uid}，{result.class_name}）",
+        f"- 难度档：≤ {result.difficulty_cap}",
+    ]
+    if result.tag_hits:
+        hit_text = "、".join(
+            f"{tag} ×{count}" for tag, count in sorted(result.tag_hits.items())
+        )
+        lines.append(f"- 命中的知识点：{hit_text}")
+    lines.extend(f"- {note}" for note in result.notes)
+
+    if result.items:
+        header = ["题目", "题型", "难度", "知识点", "题干", "推荐理由"]
+        if show_answer:
+            header += ["答案", "解析"]
+        lines.extend(["", "| " + " | ".join(header) + " |"])
+        lines.append("| " + " | ".join("---" for _ in header) + " |")
+        for item in result.items:
+            question = item.question
+            row = [
+                question.question_key,
+                qtype_label(question.qtype),
+                "—" if question.difficulty is None else str(question.difficulty),
+                "、".join(question.tags) or "—",
+                _excerpt(question.stem, stem_length),
+                "；".join(item.reasons) or "—",
+            ]
+            if show_answer:
+                row += [question.answer, question.analysis or "—"]
+            lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+
+def _validate_limit(limit: int) -> int:
+    if limit is None or int(limit) < 1:
+        raise config_loader.ConfigError("返回条数至少为 1。")
+    if int(limit) > MAX_LIST_LIMIT:
+        raise config_loader.ConfigError(
+            f"返回条数最多 {MAX_LIST_LIMIT}；一次别取太多，可以缩小筛选条件。"
+        )
+    return int(limit)
 
 
 def as_public_dict(question: Question) -> dict[str, Any]:

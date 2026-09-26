@@ -6,6 +6,7 @@
     python3 hub.py upgrade-db
     python3 hub.py import-questions (--json 文件 | --csv 文件 | --demo)
     python3 hub.py list-questions [--tag 标签] [--keyword 关键词]
+    python3 hub.py recommend-questions --student 学号
     python3 hub.py import-scores --demo
     python3 hub.py make-report
     python3 hub.py --config my.toml --db /path/to/other.db make-report
@@ -115,6 +116,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"最多返回多少道，默认 {questions_module.DEFAULT_LIST_LIMIT}",
     )
     list_questions_parser.add_argument(
+        "--show-answer", action="store_true", help="显示答案与解析（默认隐藏）"
+    )
+
+    recommend_parser = subparsers.add_parser(
+        "recommend-questions", help="按错因与画像推荐题目（只读，答案默认隐藏）"
+    )
+    add_global_options(recommend_parser, suppress_defaults=True)
+    recommend_parser.add_argument("--student", required=True, help="学生学号（student_uid）")
+    recommend_parser.add_argument(
+        "--limit",
+        type=int,
+        default=questions_module.DEFAULT_RECOMMEND_LIMIT,
+        help=f"最多推荐几道，默认 {questions_module.DEFAULT_RECOMMEND_LIMIT}",
+    )
+    recommend_parser.add_argument(
         "--show-answer", action="store_true", help="显示答案与解析（默认隐藏）"
     )
 
@@ -897,6 +913,45 @@ def run_list_questions(config: config_loader.AppConfig, args: argparse.Namespace
     return 0
 
 
+def run_recommend_questions(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    if not config.paths.database.is_file():
+        raise config_loader.ConfigError(
+            f"还没有数据库：{config.paths.database}；"
+            "请先运行 python3 hub.py init-db --demo，再用 import-questions 导入题库。"
+        )
+
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        if questions_module.count_questions(conn) == 0:
+            print(
+                "题库为空：先跑 python3 hub.py import-questions --demo，"
+                "或用 --json / --csv 导入你自己的题库。"
+            )
+            return 0
+        result = questions_module.recommend_questions(
+            conn,
+            config,
+            student_uid=args.student,
+            limit=args.limit,
+        )
+    finally:
+        conn.close()
+
+    print(
+        questions_module.format_recommendations(
+            result, show_answer=args.show_answer
+        )
+    )
+    if not result.items:
+        print("没有可推荐的题目：题库可能是空的，或题目都被难度档挡在外面。")
+    elif args.show_answer:
+        print(f"共推荐 {len(result.items)} 道（含答案与解析）。")
+    else:
+        print(f"共推荐 {len(result.items)} 道；答案默认隐藏，加 --show-answer 才显示。")
+    return 0
+
+
 def run_make_dashboard(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
     conn = db_module.connect(config.paths.database)
     try:
@@ -927,6 +982,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_import_questions(config, args)
         if args.command == "list-questions":
             return run_list_questions(config, args)
+        if args.command == "recommend-questions":
+            return run_recommend_questions(config, args)
         if args.command == "import-scores":
             return run_import_scores(config, args)
         if args.command == "make-report":

@@ -364,6 +364,105 @@ class ListQuestionsCommandTests(QuestionCommandTestCase):
         self.assertNotIn("Traceback", result.stderr)
 
 
+class RecommendQuestionsCommandTests(QuestionCommandTestCase):
+    """P3.3：recommend-questions 的学生校验、退化提示与答案隐藏。"""
+
+    def prepare(self) -> Path:
+        config_path = self.questions_config()
+        self.run_hub("--config", str(config_path), "init-db", "--demo")
+        self.run_hub("--config", str(config_path), "import-questions", "--demo")
+        self.run_hub("--config", str(config_path), "compute-profile")
+        return config_path
+
+    def first_student_uid(self) -> str:
+        conn = sqlite3.connect(self.config.paths.database)
+        try:
+            row = conn.execute(
+                "SELECT student_uid FROM students ORDER BY id LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        return str(row[0])
+
+    def test_student_option_is_required(self):
+        config_path = self.questions_config()
+        self.run_hub("--config", str(config_path), "init-db", "--demo")
+
+        result = self.run_hub("--config", str(config_path), "recommend-questions")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--student", result.stderr)
+
+    def test_recommendation_with_demo_data(self):
+        config_path = self.prepare()
+
+        result = self.run_hub(
+            "--config",
+            str(config_path),
+            "recommend-questions",
+            "--student",
+            self.first_student_uid(),
+            "--limit",
+            "3",
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("难度档", result.stdout)
+        self.assertIn("推荐理由", result.stdout)
+        self.assertIn("答案默认隐藏", result.stdout)
+        self.assertNotIn("| 答案 |", result.stdout)
+
+        shown = self.run_hub(
+            "--config",
+            str(config_path),
+            "recommend-questions",
+            "--student",
+            self.first_student_uid(),
+            "--limit",
+            "3",
+            "--show-answer",
+        )
+        self.assertEqual(shown.returncode, 0, msg=shown.stdout + shown.stderr)
+        self.assertIn("| 答案 | 解析 |", shown.stdout)
+
+    def test_unknown_student_is_actionable(self):
+        config_path = self.prepare()
+
+        result = self.run_hub(
+            "--config", str(config_path), "recommend-questions", "--student", "没有这个学号"
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("找不到学生", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_empty_bank_is_actionable(self):
+        config_path = self.questions_config()
+        self.run_hub("--config", str(config_path), "init-db", "--demo")
+
+        result = self.run_hub(
+            "--config",
+            str(config_path),
+            "recommend-questions",
+            "--student",
+            self.first_student_uid(),
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("题库为空", result.stdout)
+
+    def test_missing_database_is_actionable(self):
+        config_path = self.questions_config()
+
+        result = self.run_hub(
+            "--config", str(config_path), "recommend-questions", "--student", "x-01"
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("init-db", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+
 class ShimTests(HubCliTestCase):
     """Phase 1 的三个脚本继续可用，效果与 hub 子命令一致。"""
 
