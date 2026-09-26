@@ -12,7 +12,8 @@
 配置文件按「--config → config.toml → config.example.toml」的顺序找：没有 config.toml 时
 用仓库自带的示例配置，保证 clone 下来就能跑。
 
-班级、人数、种子、考试、作业主题与落盘位置都来自配置；数据集是确定性的——
+班级、人数、种子、考试、作业主题与落盘位置都来自配置；示例题集是仓库自带的
+自制内容（`examples/questions_demo.json`）。数据集是确定性的——
 同一份配置永远生成同一份内容，便于测试与截图复现。
 """
 
@@ -32,7 +33,7 @@ from typing import Any, Mapping
 import config_loader
 import errors as errors_module
 
-DATASET_VERSION = "demo.v6"
+DATASET_VERSION = "demo.v7"
 
 # 错因标签的显示名统一来自 errors.py 的内置词典（单一事实来源）
 ERROR_TAGS = tuple(label for _code, label in errors_module.BUILTIN_ERROR_TAGS)
@@ -260,7 +261,19 @@ def build_dataset(config: config_loader.AppConfig) -> dict[str, Any]:
         "schedule": schedule,
         "error_records": error_records,
         "behavior_records": behavior_records,
+        "questions": demo_question_items(),
     }
+
+
+def demo_question_items() -> list[dict[str, Any]]:
+    """演示数据集里的题目：直接复用仓库自带的示例题集。
+
+    函数内 import：questions.py 的 `--demo` 入口要反过来读本模块的演示数据集，
+    模块级互相 import 会成环。
+    """
+    import questions as questions_module
+
+    return [questions_module.as_dict(item) for item in questions_module.load_example_questions()]
 
 
 def check_dataset(
@@ -275,6 +288,8 @@ def check_dataset(
 
     if dataset.get("version") != DATASET_VERSION:
         problems.append(f"数据集版本不是 {DATASET_VERSION}")
+
+    problems.extend(_question_problems(dataset, config))
 
     classes = dataset.get("classes") or []
     if len(classes) != len(config.class_names):
@@ -405,6 +420,67 @@ def check_dataset(
     return problems
 
 
+def _question_problems(
+    dataset: Mapping[str, Any],
+    config: config_loader.AppConfig,
+) -> list[str]:
+    """示例题自检：数量、字段、题型/难度、标签与白名单。
+
+    白名单为空时不比对白名单（使用者还没配题库），但标签本身必须非空。
+    """
+    import questions as questions_module
+
+    raw_items = dataset.get("questions")
+    if not isinstance(raw_items, list) or not raw_items:
+        return ["数据集里没有示例题"]
+
+    problems: list[str] = []
+    if len(raw_items) > questions_module.MAX_EXAMPLE_QUESTIONS:
+        problems.append(
+            f"示例题最多 {questions_module.MAX_EXAMPLE_QUESTIONS} 道，实际 {len(raw_items)} 道"
+        )
+
+    allowed = set(config.question_bank.tags)
+    seen_keys: set[str] = set()
+    for index, raw in enumerate(raw_items, start=1):
+        label = f"示例题第 {index} 道"
+        if not isinstance(raw, Mapping):
+            problems.append(f"{label} 不是键值对")
+            continue
+
+        key = str(raw.get("question_key") or "").strip()
+        if not key:
+            problems.append(f"{label} 缺少 question_key")
+        elif key in seen_keys:
+            problems.append(f"示例题 question_key 重复：{key}")
+        else:
+            seen_keys.add(key)
+
+        if str(raw.get("qtype") or "").strip() not in questions_module.QTYPES:
+            problems.append(f"{label} 的题型不合法：{raw.get('qtype')!r}")
+        for field in ("stem", "answer"):
+            if not str(raw.get(field) or "").strip():
+                problems.append(f"{label} 的 {field} 为空")
+
+        difficulty = raw.get("difficulty")
+        if difficulty is not None and not (
+            isinstance(difficulty, int) and 1 <= difficulty <= 5
+        ):
+            problems.append(f"{label} 的难度不合法：{difficulty!r}")
+
+        tags = raw.get("tags")
+        if not isinstance(tags, list) or not 1 <= len(tags) <= 3:
+            problems.append(f"{label} 的标签应为 1-3 个：{tags!r}")
+            continue
+        for tag in tags:
+            text = str(tag).strip()
+            if not text:
+                problems.append(f"{label} 有空标签")
+            elif allowed and text not in allowed:
+                problems.append(f"{label} 的标签 {text!r} 不在 [question_bank] tags 白名单里")
+    return problems
+
+
 def _date_problems(raw: Any, semester: config_loader.SemesterConfig, label: str) -> list[str]:
     if not raw:
         return [f"{label}缺失"]
@@ -516,8 +592,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         students = sum(len(k["students"]) for k in dataset["classes"])
+        questions = len(dataset.get("questions") or [])
         print(
             f"演示数据自检通过：{len(dataset['classes'])} 个虚构班级 / {students} 名学生"
+            f" / {questions} 道自制示例题"
             f"（配置：{config_loader.resolve_cli_config_path(args.config)}）"
         )
         return 0

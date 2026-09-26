@@ -87,3 +87,32 @@ python3 hub.py make-handout --exam-key demo-exam-1      # 讲评讲义（不含�
 - 分析口径：难度系数 P = 得分率（易 P ≥ 0.7 / 中 0.4 ~ 0.7 / 难 < 0.4）；
   区分度用高低分组法（按总分取前 27% 与后 27%，至少各 1 人），D = 高分组得分率 − 低分组得分率。
 - 讲义里**不放任何试卷原题**：题目位置用 `【自制示例题】` 标记占位，题面请自行补入你有权使用的材料。
+
+## 题库（JSON / CSV）约定
+
+```bash
+python3 hub.py import-questions --json 题库.json --dry-run
+python3 hub.py import-questions --csv 题库.csv
+python3 hub.py import-questions --demo          # 只看仓库自带的自制示例题
+```
+
+- **只能导入你自己有权使用的内容**：试卷原题、教辅题目、教材节选不要导入、更不要提交进仓库。
+- JSON 格式：顶层是数组，每题一个对象，字段与下表一致；示例见 [examples/questions_demo.json](../examples/questions_demo.json)。
+- CSV 格式：同一套字段名，`options` 与 `tags` 里多个值用竖线 `|` 分隔；表头不同用 `--columns 题号=question_key` 映射。
+- 字段：
+
+  | 字段 | 必填 | 说明 |
+  | --- | --- | --- |
+  | `question_key` | 是 | 题目稳定标识，全库唯一；重复导入会整批中止 |
+  | `qtype` | 是 | `choice` / `fill` / `calculation` / `experiment` / `other` |
+  | `stem` | 是 | 题干（纯文本，不含图片） |
+  | `answer` | 是 | 答案 |
+  | `options` | 选择题必填 | 选项数组 |
+  | `analysis` | 否 | 解析 |
+  | `difficulty` | 否 | 1–5；留空表示「未标难度」 |
+  | `source_label` | 否 | 来源说明 |
+  | `tags` | 是 | 知识点标签数组，必须在 `config.toml` 的 `[question_bank] tags` 白名单里 |
+
+- 先跑 `--dry-run`：会说明来源、待写入多少道、题型分布，以及题库现有多少道。
+- 整批单事务：任何一道题有问题（空题干、重复 key、标签不在白名单）都会整批中止，不会写一半。
+- 题目只写进本机数据库，不联网、不导出；这个目录里的题库文件已被 `.gitignore` 拒绝。

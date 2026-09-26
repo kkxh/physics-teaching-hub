@@ -214,6 +214,68 @@ class UpgradeCommandTests(HubCliTestCase):
         self.assertNotIn("Traceback", result.stderr)
 
 
+QUESTION_TAGS = (
+    "运动学图像",
+    "匀变速直线运动",
+    "牛顿第二定律",
+    "受力分析",
+    "机械能守恒",
+    "欧姆定律",
+    "串并联电路",
+    "实验数据处理",
+)
+
+
+class ImportQuestionsCommandTests(HubCliTestCase):
+    """P3.1：import-questions 的来源校验、dry-run 与演示导入。"""
+
+    def questions_config(self) -> Path:
+        # 放在与原配置同一个目录，相对路径（data/physics.db）才解析到同一个库
+        path = self.config_path.parent / "questions_config.toml"
+        tags = ", ".join(f'"{tag}"' for tag in QUESTION_TAGS)
+        path.write_text(
+            CONFIG_TEXT + f"\n[question_bank]\ntags = [{tags}]\n", encoding="utf-8"
+        )
+        return path
+
+    def question_count(self) -> int:
+        conn = sqlite3.connect(self.config.paths.database)
+        try:
+            return int(conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0])
+        finally:
+            conn.close()
+
+    def test_source_is_required(self):
+        config_path = self.questions_config()
+        self.run_hub("--config", str(config_path), "init-db", "--demo")
+
+        result = self.run_hub("--config", str(config_path), "import-questions")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--demo", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_demo_import_after_a_dry_run(self):
+        config_path = self.questions_config()
+        self.run_hub("--config", str(config_path), "init-db", "--demo")
+
+        preview = self.run_hub(
+            "--config", str(config_path), "import-questions", "--demo", "--dry-run"
+        )
+        self.assertEqual(preview.returncode, 0, msg=preview.stdout + preview.stderr)
+        self.assertIn("[dry-run]", preview.stdout)
+        self.assertEqual(self.question_count(), 0)
+
+        result = self.run_hub("--config", str(config_path), "import-questions", "--demo")
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("已导入题目", result.stdout)
+        self.assertGreater(self.question_count(), 0)
+
+        again = self.run_hub("--config", str(config_path), "import-questions", "--demo")
+        self.assertEqual(again.returncode, 2)
+        self.assertIn("已经有", again.stderr)
+
+
 class ShimTests(HubCliTestCase):
     """Phase 1 的三个脚本继续可用，效果与 hub 子命令一致。"""
 

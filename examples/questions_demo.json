@@ -1,0 +1,126 @@
+[
+  {
+    "question_key": "demo-choice-newton-second",
+    "qtype": "choice",
+    "stem": "一个质量 2 kg 的物体在光滑水平面上受到 6 N 的水平恒力，物体的加速度大小是多少？",
+    "options": ["A. 1.5 m/s²", "B. 3 m/s²", "C. 6 m/s²", "D. 12 m/s²"],
+    "answer": "B",
+    "analysis": "由牛顿第二定律 a = F / m = 6 N ÷ 2 kg = 3 m/s²。",
+    "difficulty": 1,
+    "source_label": "自制示例",
+    "tags": ["牛顿第二定律"]
+  },
+  {
+    "question_key": "demo-choice-series-resistor",
+    "qtype": "choice",
+    "stem": "两个阻值都是 10 Ω 的电阻串联接入电路，串联后的总电阻是多少？",
+    "options": ["A. 5 Ω", "B. 10 Ω", "C. 20 Ω", "D. 40 Ω"],
+    "answer": "C",
+    "analysis": "串联电路总电阻等于各电阻之和：R = 10 Ω + 10 Ω = 20 Ω。",
+    "difficulty": 2,
+    "source_label": "自制示例",
+    "tags": ["串并联电路"]
+  },
+  {
+    "question_key": "demo-choice-st-graph",
+    "qtype": "choice",
+    "stem": "某物体做直线运动的位移—时间图像是一条与时间轴平行的直线（位移不为零）。该物体的运动情况是？",
+    "options": ["A. 匀速直线运动", "B. 静止", "C. 匀加速直线运动", "D. 匀减速直线运动"],
+    "answer": "B",
+    "analysis": "位移—时间图像的斜率表示速度。图像是水平直线，斜率为零，说明速度为零，物体保持静止。",
+    "difficulty": 2,
+    "source_label": "自制示例",
+    "tags": ["运动学图像"]
+  },
+  {
+    "question_key": "demo-choice-incline-forces",
+    "qtype": "choice",
+    "stem": "一个物块静止在粗糙斜面上。若只考虑物块受到的力，它一共受到几个力？",
+    "options": ["A. 2 个", "B. 3 个", "C. 4 个", "D. 5 个"],
+    "answer": "B",
+    "analysis": "物块受到重力、斜面的支持力、斜面的静摩擦力，共 3 个力。「下滑力」是重力沿斜面的分效果，不是另外一个力。",
+    "difficulty": 3,
+    "source_label": "自制示例",
+    "tags": ["受力分析"]
+  },
+  {
+    "question_key": "demo-fill-uniform-accel",
+    "qtype": "fill",
+    "stem": "一辆汽车从静止开始以 2 m/s² 的加速度做匀加速直线运动，第 3 s 末的速度大小是多少？",
+    "answer": "6 m/s",
+    "analysis": "由 v = v₀ + a t，初速度为零，v = 2 m/s² × 3 s = 6 m/s。",
+    "difficulty": 1,
+    "source_label": "自制示例",
+    "tags": ["匀变速直线运动"]
+  },
+  {
+    "question_key": "demo-fill-ohm",
+    "qtype": "fill",
+    "stem": "把 6 V 的电源接在 3 Ω 的定值电阻两端，通过电阻的电流是多少？",
+    "answer": "2 A",
+    "analysis": "由欧姆定律 I = U / R = 6 V ÷ 3 Ω = 2 A。",
+    "difficulty": 2,
+    "source_label": "自制示例",
+    "tags": ["欧姆定律"]
+  },
+  {
+    "question_key": "demo-fill-energy-conservation",
+    "qtype": "fill",
+    "stem": "一个小球从 5 m 高处由静止自由落下，不计空气阻力，取 g = 10 m/s²。小球落地时速度的大小是多少？",
+    "answer": "10 m/s",
+    "analysis": "只有重力做功，机械能守恒：mgh = ½mv²，得 v = √(2gh) = √(2 × 10 m/s² × 5 m) = 10 m/s。",
+    "difficulty": 3,
+    "source_label": "自制示例",
+    "tags": ["机械能守恒"]
+  },
+  {
+    "question_key": "demo-calc-braking-distance",
+    "qtype": "calculation",
+    "stem": "一辆汽车以 20 m/s 的速度在平直公路上行驶，刹车后做匀减速直线运动，加速度大小为 5 m/s²。求汽车从开始刹车到停下经过的距离。",
+    "answer": "40 m",
+    "analysis": "末速度为零，由 v² = 2as 得 s = v² / (2a) = (20 m/s)² ÷ (2 × 5 m/s²) = 40 m。",
+    "difficulty": 3,
+    "source_label": "自制示例",
+    "tags": ["匀变速直线运动"]
+  },
+  {
+    "question_key": "demo-calc-net-force",
+    "qtype": "calculation",
+    "stem": "质量 4 kg 的物体放在水平地面上，受到 20 N 的水平拉力，同时受到 8 N 的水平摩擦力。物体由静止开始运动，求 3 s 内通过的位移。",
+    "answer": "13.5 m",
+    "analysis": "合力 F合 = 20 N − 8 N = 12 N，由牛顿第二定律 a = F合 / m = 12 N ÷ 4 kg = 3 m/s²；由 x = ½at² = ½ × 3 m/s² × (3 s)² = 13.5 m。",
+    "difficulty": 4,
+    "source_label": "自制示例",
+    "tags": ["受力分析", "牛顿第二定律"]
+  },
+  {
+    "question_key": "demo-calc-series-voltage",
+    "qtype": "calculation",
+    "stem": "把 R₁ = 4 Ω 与 R₂ = 6 Ω 两个定值电阻串联后接到 12 V 的电源两端，求 R₂ 两端的电压。",
+    "answer": "7.2 V",
+    "analysis": "串联总电阻 R = 4 Ω + 6 Ω = 10 Ω，电流 I = U / R = 12 V ÷ 10 Ω = 1.2 A；R₂ 两端电压 U₂ = I R₂ = 1.2 A × 6 Ω = 7.2 V。",
+    "difficulty": 4,
+    "source_label": "自制示例",
+    "tags": ["欧姆定律", "串并联电路"]
+  },
+  {
+    "question_key": "demo-exp-average-length",
+    "qtype": "experiment",
+    "stem": "在测量物体长度的实验中，某同学用同一把刻度尺测量三次，读数分别为 12.40 cm、12.38 cm、12.42 cm。本次测量结果应记为多少？",
+    "answer": "12.40 cm",
+    "analysis": "多次测量取平均值可以减小偶然误差：(12.40 cm + 12.38 cm + 12.42 cm) ÷ 3 = 12.40 cm。",
+    "difficulty": 3,
+    "source_label": "自制示例",
+    "tags": ["实验数据处理"]
+  },
+  {
+    "question_key": "demo-exp-paper-tape-accel",
+    "qtype": "experiment",
+    "stem": "在用打点计时器研究匀变速直线运动的实验中，每 5 个计时间隔取一个计数点，相邻计数点间的距离依次为 2.00 cm、3.00 cm、4.00 cm。已知打点计时器每隔 0.02 s 打一个点，求物体的加速度大小。",
+    "answer": "1.0 m/s²",
+    "analysis": "计数点间的时间间隔 T = 5 × 0.02 s = 0.1 s；相邻位移之差 Δx = 3.00 cm − 2.00 cm = 1.00 cm = 0.0100 m；由 Δx = aT² 得 a = 0.0100 m ÷ (0.1 s)² = 1.0 m/s²。",
+    "difficulty": 5,
+    "source_label": "自制示例",
+    "tags": ["匀变速直线运动", "实验数据处理"]
+  }
+]

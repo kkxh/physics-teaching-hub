@@ -112,6 +112,21 @@ class DatasetTests(unittest.TestCase):
             seed_demo_data.build_dataset(config), seed_demo_data.build_dataset(config)
         )
 
+    def test_dataset_carries_the_self_made_example_questions(self):
+        config = example_config()
+
+        dataset = seed_demo_data.build_dataset(config)
+
+        items = dataset["questions"]
+        self.assertTrue(items)
+        self.assertLessEqual(len(items), 15)
+        allowed = set(config.question_bank.tags)
+        self.assertTrue(allowed, msg="示例配置应给出知识点标签白名单")
+        for item in items:
+            with self.subTest(question=item["question_key"]):
+                self.assertTrue(set(item["tags"]) <= allowed)
+                self.assertEqual(item["source_label"], "自制示例")
+
     def test_written_dataset_is_byte_for_byte_identical(self):
         config = example_config()
 
@@ -260,6 +275,24 @@ class CheckDatasetTests(unittest.TestCase):
         problems = seed_demo_data.check_dataset(dataset, config)
 
         self.assertTrue(any("版本" in problem for problem in problems))
+
+    def test_tag_outside_the_whitelist_is_reported(self):
+        config = example_config()
+        dataset = seed_demo_data.build_dataset(config)
+        dataset["questions"][0]["tags"] = ["不在白名单里的标签"]
+
+        problems = seed_demo_data.check_dataset(dataset, config)
+
+        self.assertTrue(any("白名单" in problem for problem in problems))
+
+    def test_missing_example_questions_are_reported(self):
+        config = example_config()
+        dataset = seed_demo_data.build_dataset(config)
+        dataset["questions"] = []
+
+        problems = seed_demo_data.check_dataset(dataset, config)
+
+        self.assertTrue(any("没有示例题" in problem for problem in problems))
 
 
 class CommandLineTests(unittest.TestCase):

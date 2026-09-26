@@ -4,6 +4,7 @@
 
     python3 hub.py init-db --demo [--rebuild --yes]
     python3 hub.py upgrade-db
+    python3 hub.py import-questions (--json 文件 | --csv 文件 | --demo)
     python3 hub.py import-scores --demo
     python3 hub.py make-report
     python3 hub.py --config my.toml --db /path/to/other.db make-report
@@ -35,6 +36,7 @@ import import_scores
 import init_db
 import make_report
 import profiling
+import questions as questions_module
 import reports
 from labels import LabelError
 
@@ -74,6 +76,22 @@ def build_parser() -> argparse.ArgumentParser:
         "upgrade-db", help="把存量库升级到当前 schema（只应用迁移，不导入数据）"
     )
     add_global_options(upgrade_parser, suppress_defaults=True)
+
+    questions_parser = subparsers.add_parser(
+        "import-questions", help="导入题目（JSON / CSV / 自制示例题）"
+    )
+    add_global_options(questions_parser, suppress_defaults=True)
+    questions_parser.add_argument("--json", default=None, help="题目文件（JSON 数组）")
+    questions_parser.add_argument("--csv", default=None, help="题目文件（CSV，UTF-8，带表头）")
+    questions_parser.add_argument(
+        "--demo", action="store_true", help="导入仓库自带的自制示例题集"
+    )
+    questions_parser.add_argument(
+        "--columns",
+        default=None,
+        help='CSV 表头映射，如 "题号=question_key,知识点=tags"',
+    )
+    questions_parser.add_argument("--dry-run", action="store_true", help="只预览，不写库")
 
     scores_parser = subparsers.add_parser("import-scores", help="导入成绩")
     add_global_options(scores_parser, suppress_defaults=True)
@@ -784,6 +802,37 @@ def run_upgrade_db(config: config_loader.AppConfig, args: argparse.Namespace) ->
     return 0
 
 
+def run_import_questions(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    result = questions_module.import_questions(
+        config,
+        json_path=args.json,
+        csv_path=args.csv,
+        demo=args.demo,
+        columns_spec=args.columns,
+        dry_run=args.dry_run,
+    )
+    plan = result["plan"]
+    qtypes: dict[str, int] = {}
+    for question in plan.questions:
+        qtypes[question.qtype] = qtypes.get(question.qtype, 0) + 1
+    breakdown = "、".join(f"{name} {count}" for name, count in sorted(qtypes.items()))
+
+    if result["dry_run"]:
+        print(
+            f"[dry-run] 来源：{plan.source}；待写入 {plan.row_count} 道题"
+            f"（{breakdown}），题库现有 {plan.existing_count} 道。"
+        )
+        print("[dry-run] 没有写入任何数据。")
+        return 0
+
+    print(
+        f"已导入题目：{result['imported']} 道（{breakdown}），"
+        f"题库现有 {result['total']} 道。"
+    )
+    print("提示：题目内容是使用者数据，只存在本机数据库里；仓库不分发题库。")
+    return 0
+
+
 def run_make_dashboard(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
     conn = db_module.connect(config.paths.database)
     try:
@@ -810,6 +859,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_init_db(config, args)
         if args.command == "upgrade-db":
             return run_upgrade_db(config, args)
+        if args.command == "import-questions":
+            return run_import_questions(config, args)
         if args.command == "import-scores":
             return run_import_scores(config, args)
         if args.command == "make-report":
