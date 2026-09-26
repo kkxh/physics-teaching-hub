@@ -13,7 +13,7 @@
 | 配置外置（学段/学科/学期/课表/班级/路径/演示参数） | `config_loader.py` | 已搬运 | 2026-09-23 | 上游无此层，属本仓库新增的通用化地基；环境变量只认固定白名单 |
 | 演示数据生成器 | `seed_demo_data.py` | 已搬运 | 2026-09-23 | 虚构数据；班级、人数、种子、考试、作业全部来自配置，上游使用真实课堂数据 |
 | 隐私扫描 | `scripts/privacy_scan.sh` | 已搬运 | 2026-09-21 | 私有词表走本地文件，不随仓库分发 |
-| Phase 1 最小闭环（建库 / 导入 / 报告） | `init_db.py`、`import_scores.py`、`make_report.py`、`schema/phase1_schema.sql` | 已搬运 | 2026-09-23 | **临时 schema**（`phase1-temp`），Phase 2 会替换或扩展；成绩导入只吃虚构演示数据集，正式导入器留给 Phase 2 |
+| Phase 1 最小闭环（建库 / 导入 / 报告） | `init_db.py`、`import_scores.py`、`make_report.py`、`schema/phase1_schema.sql` | 已搬运 | 2026-09-23 | **临时 schema**（`phase1-temp`），已在 Phase 2 被正式 schema 替换；这类临时库不自动迁移，走 `--rebuild --yes` 重建。成绩导入只吃虚构演示数据集，正式导入器留给 Phase 2 |
 | 正式 schema 与数据层（Phase 2 地基） | `schema/*.sql`、`db.py`、`init_db.py` | 已搬运 | 2026-09-23 | 按模块拆六个建表文件 + 独立的 `schema_migrations` 记录表；连接统一走 `db.py`（外键默认开）；Phase 1 临时库不自动迁移，走 `--rebuild --yes` 显式重建 |
 | 统一 CLI 入口 | `hub.py` + 三个兼容垫片 | 已搬运 | 2026-09-23 | 上游是多个独立脚本 + 全局 `--db`；这里做成薄分发子命令，旧三脚本保留为垫片；此后只加子命令不加脚本 |
 | 成绩导入 | `importer.py`、`hub.py import-scores` | 已搬运 | 2026-09-23 | CSV 与 Excel（P2.1a/P2.1b）都支持：身份按 uid 优先、姓名歧义报错、dry-run 与执行同条件、单事务、0 分合法、列名可映射。差异：上游直接吃真实成绩表且姓名可能静默取第一条；这里要求显式列映射，并新增唯一的第三方依赖 `openpyxl`（MIT，仅用于读 .xlsx） |
@@ -23,7 +23,7 @@
 | 预警与跟进闭环 | `alerts.py`、`hub.py scan-alerts / list-alerts / resolve-alert / alert-stats` | 已搬运 | 2026-09-24 | 规则阈值走 `[alerts]`；扫描幂等（同一学生同一规则只留一条未解决预警）；条件消失不自动关闭，关闭必须写跟进记录（`follow_ups` 记人/时间/说明/结果）；上游写死的阈值与静默自动解决都不搬 |
 | 周报与阶段巡检 | `reports.py`、`hub.py weekly-report / phase-patrol` | 已搬运 | 2026-09-24 | 汇总逻辑从数据库现算（考试/作业/错因/行为/预警），周报按 ISO 周指定且必须落在学期内；阶段巡检含教学进度、阶段、作业覆盖、画像与预警提醒；报告只写相对路径、可分享；上游面向特定班级的文案改成配置与 labels |
 | 考试链路（分析 / 讲评 / 讲义） | `exam.py`、`hub.py import-item-scores / exam-analysis / make-handout` | 已搬运 | 2026-09-25 | 小题级分析（得分率/难度分档/高低分组区分度）+ 讲评顺序建议 + 讲义；**示例题自制**：讲义不放任何试卷原题，题面位置用「自制示例题」标记占位；难度与区分度口径写进报告与文档 |
-| 题库（导入 / 检索 / 推荐） | — | 未开始 | — | — |
+| 题库（导入 / 检索 / 推荐） | `schema/questions.sql`、`schema/migrations/0001_questions.sql`、`questions.py` | 进行中 | 2026-09-26 | P3.0 已落地：表结构（题干/选项/答案/解析/难度/知识点标签）+ 数据层原语 + `hub.py upgrade-db` 非破坏式升级链路（`phase2` 库跑迁移、不删库）。导入/检索/推荐在 P3.1–P3.4；上游的整卷解析与图片题不搬，题目内容本身永不入仓（示例题自制，放在顶层 `examples/`） |
 | 本地看板前端 | `dashboard.py`、`hub.py make-dashboard` | 已搬运 | 2026-09-25 | 构建时把数据嵌进 `outputs/dashboard/index.html`（另存一份 data.json），双击即可离线看；无 CDN、无外部请求；页面文字全部取自 `labels` 的 `[dashboard]` 段；空值统一显示占位符、排序跳过 null；上游依赖运行时 API 与前端资源，这里改成单文件静态站 |
 | 本地 API | `api.py`、`hub.py serve` | 已搬运 | 2026-09-25 | 只读 GET；只绑 `127.0.0.1`、默认端口 8420；CORS 只回固定本机 Origin 并带 `Vary: Origin`，无通配符；错误统一 JSON 体 + 404/400/405；标准库 `http.server`，不引框架；上游的 CORS 通配符与写接口都不搬 |
 
@@ -32,6 +32,11 @@ Phase 1（通用化地基）已于 2026-09-23 收口：配置、路径与时间�
 
 Phase 2（逐模块搬运）已于 2026-09-25 收口：台账里除题库（属 Phase 3）外全部为「已搬运」；
 R1（P2.0 地基）、R2（P2.4/P2.5 写入与闭环）、R3（全量收口）三次评审发现的问题都已修复并补了回归测试。
+
+Phase 3（题库与教材隔离）正在进行：P3.0（2026-09-26）把 schema 版本升到 `phase3`，
+`phase2` 存量库用 `python3 hub.py upgrade-db` 非破坏式升级（只跑迁移，不删库、不导入演示数据）；
+`phase1-temp` 与未知版本仍然要求重建。
+
 发布前硬性待办仍留在 [ROADMAP.md](ROADMAP.md)：补依赖许可清单、对全部历史做一次隐私扫描——按计划在 Phase 4 发布前执行。
 
 ## 记录要求

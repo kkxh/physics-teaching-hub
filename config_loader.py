@@ -94,6 +94,18 @@ class AlertRules:
 
 
 @dataclass(frozen=True)
+class QuestionBankConfig:
+    """题库配置（P3.0）：知识点标签白名单 + 错因标签到知识点的映射。
+
+    两套词典分开：错因标签来自 `[error_tags]`（内置词典在 errors.py），
+    知识点标签只在这里配；题库导入按 tags 白名单校验，推荐按 tag_map 做映射。
+    """
+
+    tags: tuple[str, ...] = ()
+    tag_map: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     project: ProjectConfig
     paths: PathsConfig
@@ -108,6 +120,8 @@ class AppConfig:
     profile_weights: Mapping[str, float] = field(default_factory=dict)
     # 预警阈值（P2.5）
     alert_rules: AlertRules = field(default_factory=AlertRules)
+    # 题库：知识点标签白名单与错因→知识点映射（P3.0）
+    question_bank: QuestionBankConfig = field(default_factory=QuestionBankConfig)
     # 相对路径的解析基准：load_config 传配置文件所在目录，直接调用 parse_config 时为当前工作目录。
     base_dir: Path = Path(".")
     # 教学阶段：配置里写了 [[phases]] 就用配置的，否则用学段 profile 的默认阶段。
@@ -235,6 +249,7 @@ def parse_config(
     error_tags_raw = raw.get("error_tags") or {}
     profile_raw = raw.get("profile") or {}
     alerts_raw = raw.get("alerts") or {}
+    question_bank_raw = raw.get("question_bank") or {}
 
     locale = str(project_raw.get("locale") or DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
     labels = _load_labels(project_raw.get("labels_dir"), base, locale)
@@ -264,6 +279,7 @@ def parse_config(
     error_tags = _parse_error_tags(error_tags_raw)
     profile_weights = _parse_profile_weights(profile_raw)
     alert_rules = _parse_alert_rules(alerts_raw)
+    question_bank = _parse_question_bank(question_bank_raw)
 
     return AppConfig(
         project=project,
@@ -278,6 +294,7 @@ def parse_config(
         error_tags=error_tags,
         profile_weights=profile_weights,
         alert_rules=alert_rules,
+        question_bank=question_bank,
     )
 
 
@@ -661,6 +678,65 @@ def _parse_error_tags(raw: Any) -> dict[str, str]:
             raise ConfigError(f"配置项 error_tags 里的 {key} 缺少显示名。")
         tags[key] = text
     return tags
+
+
+def _parse_question_bank(raw: Any) -> QuestionBankConfig:
+    """解析 [question_bank]：知识点标签白名单 + 错因标签到知识点的映射。
+
+    白名单为空是合法的（还没配题库），导入器会在真正导入时提示怎么配；
+    但映射里若引用了不在白名单里的标签，说明配置写岔了，直接报错。
+    """
+    if not isinstance(raw, Mapping):
+        raise ConfigError(
+            '配置项 question_bank 应是一张表：[question_bank] 里写 tags = ["知识点", ...]。'
+        )
+
+    tags_raw = raw.get("tags") or []
+    if not isinstance(tags_raw, (list, tuple)):
+        raise ConfigError(
+            '配置项 question_bank.tags 应是字符串数组，例如 tags = ["牛顿第二定律", "欧姆定律"]。'
+        )
+    tags: list[str] = []
+    for index, item in enumerate(tags_raw):
+        tag = str(item).strip()
+        if not tag:
+            raise ConfigError(f"配置项 question_bank.tags[{index}] 不能为空。")
+        if tag in tags:
+            raise ConfigError(f"配置项 question_bank.tags 里有重复标签：{tag!r}。")
+        tags.append(tag)
+
+    tag_map_raw = raw.get("tag_map") or {}
+    if not isinstance(tag_map_raw, Mapping):
+        raise ConfigError(
+            "配置项 question_bank.tag_map 应是一张表：错因代码 = [知识点标签, ...]。"
+        )
+    tag_map: dict[str, tuple[str, ...]] = {}
+    for code, value in tag_map_raw.items():
+        key = str(code).strip()
+        if not key or any(char.isspace() for char in key):
+            raise ConfigError(f"配置项 question_bank.tag_map 里的代码不合法：{code!r}。")
+        if isinstance(value, str):
+            values: list[Any] = [value]
+        elif isinstance(value, (list, tuple)):
+            values = list(value)
+        else:
+            raise ConfigError(
+                f"配置项 question_bank.tag_map.{key} 应是标签数组，例如 = [\"牛顿第二定律\"]。"
+            )
+        mapped: list[str] = []
+        for index, item in enumerate(values):
+            tag = str(item).strip()
+            if not tag:
+                raise ConfigError(f"配置项 question_bank.tag_map.{key}[{index}] 不能为空。")
+            if tags and tag not in tags:
+                raise ConfigError(
+                    f"配置项 question_bank.tag_map.{key} 里的 {tag!r} 不在 "
+                    "question_bank.tags 白名单里；请先把它加进白名单。"
+                )
+            mapped.append(tag)
+        tag_map[key] = tuple(mapped)
+
+    return QuestionBankConfig(tags=tuple(tags), tag_map=tag_map)
 
 
 def _parse_profile_weights(raw: Any) -> dict[str, float]:

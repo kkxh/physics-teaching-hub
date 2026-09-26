@@ -166,10 +166,10 @@ class LoopTests(LoopTestCase):
         )
         self.assertEqual(second["exams"], len(self.config.demo.exams))
 
-    def test_schema_is_marked_phase2(self):
+    def test_schema_is_marked_phase3(self):
         self.run_loop()
 
-        self.assertEqual(self.meta("schema_version"), "phase2")
+        self.assertEqual(self.meta("schema_version"), "phase3")
         self.assertEqual(self.meta("dataset_version"), seed_demo_data.DATASET_VERSION)
 
         # Phase 1 的临时 schema 声明留在历史文档与迁移说明里

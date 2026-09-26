@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 import config_loader  # noqa: E402
 import hub  # noqa: E402
+import init_db  # noqa: E402
 
 CONFIG_TEXT = """
 [project]
@@ -106,7 +107,7 @@ class SubcommandTests(HubCliTestCase):
             ).fetchone()[0]
         finally:
             conn.close()
-        self.assertEqual(version, "phase2")
+        self.assertEqual(version, "phase3")
 
     def test_import_scores_requires_an_explicit_source(self):
         self.run_hub("--config", str(self.config_path), "init-db", "--demo")
@@ -145,6 +146,71 @@ class SubcommandTests(HubCliTestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("SQLite", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+
+class UpgradeCommandTests(HubCliTestCase):
+    """P3.0：存量 phase2 库的子命令行为（拒绝乱用 / 升级 / 幂等）。"""
+
+    def write_phase2_database(self) -> None:
+        database = self.config.paths.database
+        database.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(database)
+        try:
+            for name in init_db.SCHEMA_FILES:
+                if name == "questions.sql":
+                    continue
+                conn.executescript((init_db.SCHEMA_DIR / name).read_text(encoding="utf-8"))
+            with conn:
+                conn.execute(
+                    "INSERT INTO meta (key, value) VALUES ('schema_version', 'phase2')"
+                )
+                conn.execute("INSERT INTO classes (name) VALUES ('标记班')")
+        finally:
+            conn.close()
+
+    def test_stale_database_is_told_to_run_upgrade_db(self):
+        self.write_phase2_database()
+
+        result = self.run_hub("--config", str(self.config_path), "make-report")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("upgrade-db", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_upgrade_db_applies_migrations_without_demo_data(self):
+        self.write_phase2_database()
+
+        result = self.run_hub("--config", str(self.config_path), "upgrade-db")
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("0001_questions.sql", result.stdout)
+        conn = sqlite3.connect(self.config.paths.database)
+        try:
+            version = conn.execute(
+                "SELECT value FROM meta WHERE key = 'schema_version'"
+            ).fetchone()[0]
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+            classes = [row[0] for row in conn.execute("SELECT name FROM classes")]
+        finally:
+            conn.close()
+        self.assertEqual(version, "phase3")
+        self.assertTrue({"questions", "question_tags"} <= tables)
+        self.assertEqual(classes, ["标记班"], msg="upgrade-db 不该顺带导入演示名单")
+
+    def test_upgrade_db_on_a_current_database_is_a_no_op(self):
+        self.run_hub("--config", str(self.config_path), "init-db", "--demo")
+
+        result = self.run_hub("--config", str(self.config_path), "upgrade-db")
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("不需要升级", result.stdout)
+
+    def test_upgrade_db_reports_a_missing_database(self):
+        result = self.run_hub("--config", str(self.config_path), "upgrade-db")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("init-db", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
 

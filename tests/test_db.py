@@ -79,6 +79,24 @@ class ConnectTests(unittest.TestCase):
             self.assertIn("phase1-temp", message)
             self.assertIn("--rebuild", message)
 
+    def test_require_schema_points_known_old_versions_to_upgrade(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = db_module.connect(Path(tmp) / "stale.db")
+            self.addCleanup(conn.close)
+            with conn:
+                conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                conn.execute(
+                    "INSERT INTO meta (key, value) VALUES ('schema_version', 'phase2')"
+                )
+
+            with self.assertRaises(config_loader.ConfigError) as ctx:
+                db_module.require_schema(conn)
+
+            message = str(ctx.exception)
+            self.assertIn("phase2", message)
+            self.assertIn("upgrade-db", message)
+            self.assertNotIn("--rebuild", message)
+
     def test_require_schema_explains_missing_schema(self):
         with tempfile.TemporaryDirectory() as tmp:
             conn = db_module.connect(Path(tmp) / "empty.db")

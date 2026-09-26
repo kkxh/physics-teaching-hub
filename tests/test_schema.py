@@ -48,6 +48,30 @@ def make_config(base: Path, **demo: Any) -> config_loader.AppConfig:
     )
 
 
+# phase2 的建表文件：不含 Phase 3 才加的题库表
+PHASE2_SCHEMA_FILES = tuple(name for name in init_db.SCHEMA_FILES if name != "questions.sql")
+
+
+def write_phase2_database(path: Path, *, marker: str = "标记班") -> Path:
+    """构造一个 phase2 库：跑 phase2 的建表文件、写版本号，并塞一条业务数据。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = init_db.connect(path)
+    try:
+        for name in PHASE2_SCHEMA_FILES:
+            conn.executescript((init_db.SCHEMA_DIR / name).read_text(encoding="utf-8"))
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO meta (key, value) VALUES ('schema_version', 'phase2')
+                ON CONFLICT (key) DO UPDATE SET value = excluded.value
+                """
+            )
+            conn.execute("INSERT INTO classes (name) VALUES (?)", (marker,))
+    finally:
+        conn.close()
+    return path
+
+
 class SchemaFileTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -65,7 +89,15 @@ class SchemaFileTests(unittest.TestCase):
     def test_schema_files_are_declared_in_build_order(self):
         self.assertEqual(
             init_db.SCHEMA_FILES,
-            ("core.sql", "scores.sql", "homework.sql", "errors.sql", "profile.sql", "alerts.sql"),
+            (
+                "core.sql",
+                "scores.sql",
+                "homework.sql",
+                "errors.sql",
+                "profile.sql",
+                "alerts.sql",
+                "questions.sql",
+            ),
         )
         for name in init_db.SCHEMA_FILES:
             with self.subTest(file=name):
@@ -80,7 +112,7 @@ class SchemaFileTests(unittest.TestCase):
                 self.assertTrue(
                     set(expected) <= created, msg=f"{name} 缺少表：{set(expected) - created}"
                 )
-        self.assertEqual(init_db.schema_version(self.conn), "phase2")
+        self.assertEqual(init_db.schema_version(self.conn), "phase3")
 
     def test_phase1_tables_keep_working(self):
         # Phase 1 的三条命令依赖这几张表，结构必须还在
@@ -231,11 +263,11 @@ class InitDatabaseTests(InitDatabaseHelpersMixin, unittest.TestCase):
 
         summary = init_db.init_database(self.config, rebuild=True, confirmed=True)
 
-        self.assertEqual(summary["schema_version"], "phase2")
+        self.assertEqual(summary["schema_version"], "phase3")
         self.assertIn(database, summary["removed"])
         conn = init_db.connect(database)
         try:
-            self.assertEqual(init_db.schema_version(conn), "phase2")
+            self.assertEqual(init_db.schema_version(conn), "phase3")
             students = conn.execute("SELECT COUNT(*) AS n FROM students").fetchone()["n"]
         finally:
             conn.close()
@@ -249,7 +281,7 @@ class InitDatabaseTests(InitDatabaseHelpersMixin, unittest.TestCase):
         self.assertEqual((second["classes"], second["students"]), (1, 3))
 
     def test_rebuild_replaces_a_current_database_too(self):
-        # --rebuild 是对「重建」的明确要求，版本已经是 phase2 也要真的重建
+        # --rebuild 是对「重建」的明确要求，版本已经是当前版本也要真的重建
         init_db.init_database(self.config)
         self.insert_marker_class("标记班")
 
@@ -280,7 +312,7 @@ class InitDatabaseTests(InitDatabaseHelpersMixin, unittest.TestCase):
         self.assertIn(database, summary["removed"])
         conn = init_db.connect(database)
         try:
-            self.assertEqual(init_db.schema_version(conn), "phase2")
+            self.assertEqual(init_db.schema_version(conn), "phase3")
         finally:
             conn.close()
 
@@ -339,6 +371,134 @@ class MigrationTests(unittest.TestCase):
         applied = init_db.apply_migrations(self.conn)
 
         self.assertEqual(applied, ["0001_a.sql", "0002_b.sql"])
+
+
+QUESTION_OBJECTS = (
+    "questions",
+    "question_tags",
+    "idx_questions_qtype",
+    "idx_question_tags_tag",
+)
+
+
+class UpgradeTests(unittest.TestCase):
+    """P3.0 升级链路：phase2 库走迁移不丢数据，phase1-temp 仍要求重建。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name)
+        self.config = make_config(self.base)
+
+    def question_objects(self, path: Path) -> dict[tuple[str, str], str]:
+        conn = init_db.connect(path)
+        try:
+            return {
+                (str(row["type"]), str(row["name"])): str(row["sql"])
+                for row in conn.execute(
+                    "SELECT type, name, sql FROM sqlite_master WHERE name IN "
+                    f"({', '.join('?' for _ in QUESTION_OBJECTS)})",
+                    QUESTION_OBJECTS,
+                )
+            }
+        finally:
+            conn.close()
+
+    def test_upgrade_adds_question_tables_and_keeps_data(self):
+        database = write_phase2_database(self.config.paths.database)
+
+        summary = init_db.upgrade_database(self.config)
+
+        self.assertTrue(summary["changed"])
+        self.assertEqual(summary["from"], "phase2")
+        self.assertEqual(summary["to"], init_db.SCHEMA_VERSION)
+        self.assertEqual(summary["migrations"], ["0001_questions.sql"])
+
+        conn = init_db.connect(database)
+        try:
+            self.assertEqual(init_db.schema_version(conn), init_db.SCHEMA_VERSION)
+            tables = {
+                str(row["name"])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            self.assertTrue({"questions", "question_tags"} <= tables)
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) AS n FROM questions").fetchone()["n"], 0
+            )
+            self.assertEqual(
+                [str(row["name"]) for row in conn.execute("SELECT name FROM classes")],
+                ["标记班"],
+                msg="升级不该丢掉原有数据",
+            )
+            recorded = [
+                str(row["name"]) for row in conn.execute("SELECT name FROM schema_migrations")
+            ]
+        finally:
+            conn.close()
+        self.assertEqual(recorded, ["0001_questions.sql"])
+
+    def test_upgrade_is_idempotent(self):
+        write_phase2_database(self.config.paths.database)
+
+        first = init_db.upgrade_database(self.config)
+        second = init_db.upgrade_database(self.config)
+
+        self.assertEqual(first["migrations"], ["0001_questions.sql"])
+        self.assertFalse(second["changed"])
+        self.assertEqual(second["migrations"], [])
+
+        conn = init_db.connect(self.config.paths.database)
+        try:
+            recorded = [
+                str(row["name"]) for row in conn.execute("SELECT name FROM schema_migrations")
+            ]
+        finally:
+            conn.close()
+        self.assertEqual(recorded, ["0001_questions.sql"])
+
+    def test_upgraded_schema_matches_a_fresh_database(self):
+        database = write_phase2_database(self.config.paths.database)
+        init_db.upgrade_database(self.config)
+        upgraded = self.question_objects(database)
+
+        fresh_path = self.base / "fresh.db"
+        fresh = init_db.connect(fresh_path)
+        try:
+            init_db.apply_schema(fresh)
+        finally:
+            fresh.close()
+
+        self.assertEqual(upgraded, self.question_objects(fresh_path))
+        self.assertIn(("table", "questions"), upgraded)
+        self.assertIn(("index", "idx_question_tags_tag"), upgraded)
+
+    def test_phase1_database_still_requires_rebuild(self):
+        database = self.config.paths.database
+        database.parent.mkdir(parents=True, exist_ok=True)
+        conn = init_db.connect(database)
+        try:
+            with conn:
+                conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                conn.execute(
+                    "INSERT INTO meta (key, value) VALUES ('schema_version', 'phase1-temp')"
+                )
+        finally:
+            conn.close()
+
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            init_db.upgrade_database(self.config)
+
+        message = str(ctx.exception)
+        self.assertIn("phase1-temp", message)
+        self.assertIn("--rebuild", message)
+
+    def test_upgrade_needs_an_existing_database(self):
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            init_db.upgrade_database(self.config)
+
+        message = str(ctx.exception)
+        self.assertIn("不存在", message)
+        self.assertIn("init-db", message)
 
 
 if __name__ == "__main__":

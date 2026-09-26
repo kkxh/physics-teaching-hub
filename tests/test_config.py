@@ -301,6 +301,60 @@ class DemoConfigTests(unittest.TestCase):
                 self.assertIn(needle, str(ctx.exception))
 
 
+class QuestionBankConfigTests(unittest.TestCase):
+    def test_defaults_are_empty(self):
+        config = config_loader.parse_config(minimal_raw())
+
+        self.assertEqual(config.question_bank.tags, ())
+        self.assertEqual(dict(config.question_bank.tag_map), {})
+
+    def test_tags_and_tag_map_are_parsed(self):
+        config = config_loader.parse_config(
+            minimal_raw(
+                question_bank={
+                    "tags": ["欧姆定律", "串并联电路"],
+                    "tag_map": {
+                        "calculation": ["欧姆定律"],
+                        "concept_confusion": ["欧姆定律", "串并联电路"],
+                    },
+                }
+            )
+        )
+
+        self.assertEqual(config.question_bank.tags, ("欧姆定律", "串并联电路"))
+        self.assertEqual(config.question_bank.tag_map["calculation"], ("欧姆定律",))
+        self.assertEqual(
+            config.question_bank.tag_map["concept_confusion"], ("欧姆定律", "串并联电路")
+        )
+
+    def test_single_tag_map_value_is_accepted(self):
+        config = config_loader.parse_config(
+            minimal_raw(question_bank={"tags": ["欧姆定律"], "tag_map": {"calculation": "欧姆定律"}})
+        )
+
+        self.assertEqual(config.question_bank.tag_map["calculation"], ("欧姆定律",))
+
+    def test_invalid_question_bank_values_are_rejected(self):
+        cases = {
+            "tags 结构": ({"tags": "欧姆定律"}, "question_bank.tags"),
+            "空标签": ({"tags": ["  "]}, "question_bank.tags[0]"),
+            "重复标签": ({"tags": ["欧姆定律", "欧姆定律"]}, "重复标签"),
+            "tag_map 结构": ({"tag_map": ["欧姆定律"]}, "question_bank.tag_map"),
+            "tag_map 值结构": ({"tags": ["欧姆定律"], "tag_map": {"calculation": 3}}, "tag_map.calculation"),
+            "tag_map 空标签": ({"tags": ["欧姆定律"], "tag_map": {"calculation": [" "]}}, "tag_map.calculation[0]"),
+            "tag_map 超白名单": (
+                {"tags": ["欧姆定律"], "tag_map": {"calculation": ["串并联电路"]}},
+                "不在",
+            ),
+        }
+
+        for label, (section, needle) in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaises(config_loader.ConfigError) as ctx:
+                    config_loader.parse_config(minimal_raw(question_bank=section))
+                self.assertIn(needle, str(ctx.exception))
+
+
 class EnvOverrideTests(unittest.TestCase):
     def test_env_whitelist_is_exactly_the_documented_names(self):
         names = set(config_loader.ENV_OVERRIDES) | {config_loader.CONFIG_ENV_VAR}

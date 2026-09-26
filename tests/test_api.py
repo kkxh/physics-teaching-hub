@@ -104,7 +104,7 @@ class EndpointTests(ApiTestCase):
         self.assertEqual(payload["semester"]["name"], "2026-2027 学年第一学期")
         self.assertIn("week", payload["teaching"])
         self.assertIn("phase", payload["teaching"])
-        self.assertEqual(payload["schema_version"], "phase2")
+        self.assertEqual(payload["schema_version"], "phase3")
 
     def test_classes_endpoint(self):
         status, _headers, payload = self.request("/api/classes")

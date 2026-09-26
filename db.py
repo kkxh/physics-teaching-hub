@@ -16,9 +16,12 @@ from pathlib import Path
 import config_loader
 
 # 当前正式 schema 版本；建库与检查都以此为准。
-SCHEMA_VERSION = "phase2"
+SCHEMA_VERSION = "phase3"
 # Phase 1 的临时 schema：表名与字段不承诺兼容，遇到它必须显式重建。
 PHASE1_SCHEMA_VERSION = "phase1-temp"
+# 已知的旧版本：可以经 schema/migrations/ 非破坏式升级（`hub.py upgrade-db`），
+# 不要求删库重建。未知版本与 phase1-temp 仍然只给重建这一条路。
+MIGRATABLE_SCHEMA_VERSIONS: tuple[str, ...] = ("phase2",)
 
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
@@ -72,6 +75,11 @@ def require_schema(
         raise config_loader.ConfigError(
             f"这个库还是 Phase 1 的临时 schema（{PHASE1_SCHEMA_VERSION}），"
             f"当前要求 {expected}；请用 python3 hub.py init-db --demo --rebuild --yes 重建。"
+        )
+    if actual in MIGRATABLE_SCHEMA_VERSIONS:
+        raise config_loader.ConfigError(
+            f"数据库 schema 版本是 {actual or '未知'}，落后于当前要求的 {expected}；"
+            "请先运行 python3 hub.py upgrade-db 应用迁移（不会删除数据）。"
         )
     raise config_loader.ConfigError(
         f"数据库 schema 版本是 {actual or '未知'}，当前要求 {expected}；"

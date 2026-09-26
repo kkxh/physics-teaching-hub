@@ -1,4 +1,4 @@
-"""建库 + 灌入虚构演示名单（Phase 2 起用正式 schema）。
+"""建库 + 灌入虚构演示名单 + 存量库升级（Phase 2 起用正式 schema）。
 
 用法：
     python3 init_db.py --demo                    # 用配置里的数据库路径建库
@@ -9,8 +9,12 @@
 真实成绩走 `hub.py import-scores`（CSV / Excel）。
 建库是幂等的：重复执行不会产生重复行，也不会清掉已有数据。
 
-schema 由 schema/*.sql 按固定顺序建好（core → scores → homework → errors → profile → alerts），
-`meta.schema_version` 记为 `phase2`；此后的结构变更走 `schema/migrations/`。
+schema 由 schema/*.sql 按固定顺序建好
+（core → scores → homework → errors → profile → alerts → questions），
+`meta.schema_version` 记为 `phase3`。
+
+存量库升级（Phase 2 之后的结构变更）走 `schema/migrations/`：已知旧版本（`phase2`）
+由 `hub.py upgrade-db` 应用迁移、不删库；`phase1-temp` 与未知版本仍要求 `--rebuild --yes`。
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ SCHEMA_FILES: tuple[str, ...] = (
     "errors.sql",
     "profile.sql",
     "alerts.sql",
+    "questions.sql",
 )
 
 # 每个文件必须建出的表：按完整清单校验，避免残缺 schema 被当成建好了。
@@ -48,6 +53,7 @@ EXPECTED_TABLES_BY_FILE: Mapping[str, tuple[str, ...]] = {
     "errors.sql": ("error_tags", "error_records", "behavior_records"),
     "profile.sql": ("ability_scores",),
     "alerts.sql": ("alerts", "follow_ups"),
+    "questions.sql": ("questions", "question_tags"),
 }
 
 SCHEMA_VERSION = db_module.SCHEMA_VERSION
@@ -80,6 +86,11 @@ def apply_schema(conn: sqlite3.Connection) -> None:
                 f"{name} 没建全，缺少这些表：{'、'.join(missing)}；请检查 schema 文件是否被改动过。"
             )
 
+    write_schema_version(conn)
+
+
+def write_schema_version(conn: sqlite3.Connection) -> None:
+    """把 meta.schema_version 写成当前版本。"""
     with conn:
         conn.execute(
             """
@@ -88,6 +99,59 @@ def apply_schema(conn: sqlite3.Connection) -> None:
             """,
             (SCHEMA_VERSION,),
         )
+
+
+def verify_schema_tables(conn: sqlite3.Connection) -> None:
+    """按完整表清单校验 schema 是否齐全（升级后也要过这一关，才写版本号）。"""
+    missing = [
+        f"{name} 的 {table}"
+        for name in SCHEMA_FILES
+        for table in EXPECTED_TABLES_BY_FILE[name]
+        if not table_exists(conn, table)
+    ]
+    if missing:
+        raise config_loader.ConfigError(
+            f"schema 不完整，缺少这些表：{'、'.join(missing)}；"
+            "请检查 schema/ 与 schema/migrations/，或加 --rebuild --yes 重建（会删掉这个库）。"
+        )
+
+
+def require_upgradable(database: Path, existing: str | None) -> None:
+    """版本检查：当前版本与已知旧版本放行，phase1-temp 与未知版本要求重建。"""
+    if existing is None or existing == SCHEMA_VERSION:
+        return
+    if existing in db_module.MIGRATABLE_SCHEMA_VERSIONS:
+        return
+    hint = (
+        "Phase 1 的临时库不会自动迁移"
+        if existing == PHASE1_SCHEMA_VERSION
+        else "schema 版本不在已知的升级范围内"
+    )
+    raise config_loader.ConfigError(
+        f"{hint}：{database} 当前是 {existing or '未知版本'}，本版本要求 {SCHEMA_VERSION}；"
+        "请加 --rebuild --yes 重建（会删掉这个库）。"
+    )
+
+
+def ensure_schema(conn: sqlite3.Connection) -> list[str]:
+    """把库带到当前 schema 版本，返回本次应用的迁移名。
+
+    - 空库：跑建表脚本，再记录随库分发的迁移（DDL 幂等，等于 no-op）；
+    - 已知旧版本：跑迁移 + 校验表齐全，通过后才写版本号，不删库、不丢数据；
+    - phase1-temp 与未知版本：由调用方先走 `require_upgradable` 拦下。
+    """
+    existing = schema_version(conn)
+    if existing == SCHEMA_VERSION:
+        verify_schema_tables(conn)
+        return []
+    if existing is None:
+        apply_schema(conn)
+        return apply_migrations(conn)
+
+    applied = apply_migrations(conn)
+    verify_schema_tables(conn)
+    write_schema_version(conn)
+    return applied
 
 
 def apply_migrations(conn: sqlite3.Connection) -> list[str]:
@@ -201,24 +265,14 @@ def init_database(
             existing = schema_version(conn)
         finally:
             conn.close()
-        if existing != SCHEMA_VERSION:
-            hint = (
-                "Phase 1 的临时库不会自动迁移"
-                if existing == PHASE1_SCHEMA_VERSION
-                else "schema 版本对不上"
-            )
-            raise config_loader.ConfigError(
-                f"{hint}：{database} 当前是 {existing or '未知版本'}，本版本要求 {SCHEMA_VERSION}；"
-                "请加 --rebuild --yes 重建（会删掉这个库）。"
-            )
+        require_upgradable(database, existing)
 
     dataset = seed_demo_data.load_or_create_dataset(config)
     seed_demo_data.validate_dataset_for_import(dataset, config)
 
     conn = connect(database)
     try:
-        apply_schema(conn)
-        applied_migrations = apply_migrations(conn)
+        applied_migrations = ensure_schema(conn)
         counts = import_roster(conn, dataset)
         homework_counts = homework_module.import_demo_homework(conn, dataset)
         error_counts = errors_module.import_demo_error_records(
@@ -237,6 +291,45 @@ def init_database(
         "dataset": config.demo.output,
         "migrations": applied_migrations,
         "removed": removed,
+    }
+
+
+def upgrade_database(config: config_loader.AppConfig) -> dict[str, Any]:
+    """把存量库升级到当前 schema：只应用迁移，不导入任何数据。
+
+    与 `init-db --demo` 分开，是为了让真实库有干净的升级入口——
+    升级不该顺带灌演示名单。
+    """
+    database = config.paths.database
+    if not database.exists():
+        raise config_loader.ConfigError(
+            f"数据库不存在：{database}；请先用 python3 hub.py init-db --demo 建演示库，"
+            "或用 --db 指向已有的库。"
+        )
+
+    conn = connect(database)
+    try:
+        existing = schema_version(conn)
+        require_upgradable(database, existing)
+        if existing == SCHEMA_VERSION:
+            verify_schema_tables(conn)
+            return {
+                "database": database,
+                "from": existing,
+                "to": SCHEMA_VERSION,
+                "migrations": [],
+                "changed": False,
+            }
+        applied = ensure_schema(conn)
+    finally:
+        conn.close()
+
+    return {
+        "database": database,
+        "from": existing,
+        "to": SCHEMA_VERSION,
+        "migrations": applied,
+        "changed": True,
     }
 
 

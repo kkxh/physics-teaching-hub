@@ -1,6 +1,6 @@
 # 长期路线
 
-> 状态：**Phase 2 已完成（逐模块搬运）**——Phase 1 的通用化地基 + Phase 2 的模块（成绩导入、作业与订正、错因与行为、画像、预警闭环、周报与巡检、考试链路、本地 API、看板）全部落地，R1/R2/R3 评审均已闭环；下一步进入 Phase 3（题库与教材隔离）。
+> 状态：**Phase 3 进行中（题库与教材隔离）**——Phase 1 的通用化地基 + Phase 2 的模块（成绩导入、作业与订正、错因与行为、画像、预警闭环、周报与巡检、考试链路、本地 API、看板）全部落地，R1/R2/R3 评审均已闭环；Phase 3 的 P3.0（题库 schema + 数据层 + 非破坏式升级链路）已落地，小步清单见 [PHASE3_PLAN.md](PHASE3_PLAN.md)。
 > 小步清单与每步验收见 [PHASE1_PLAN.md](PHASE1_PLAN.md)。
 > 本文件是所有长期对话的路线锚点：换会话、换 agent 时先读这里。
 
@@ -50,9 +50,10 @@ python3 import_scores.py       # 导入演示成绩
 python3 make_report.py         # 生成 Markdown 报告（outputs/）
 ```
 
-**临时 schema 声明**：最小闭环用的 `schema/phase1_schema.sql` 是**临时** schema
-（库里 `meta.schema_version = 'phase1-temp'`）。Phase 2 会用正式的模块化 schema 替换或扩展它，
-表名、字段与约束都不承诺兼容，请勿据此做长期集成或数据迁移。
+**临时 schema 声明（已被替换）**：Phase 1 期间最小闭环用的是**临时** schema
+（`meta.schema_version = 'phase1-temp'`）；Phase 2 起已换成正式的模块化 schema。
+这类临时库不自动迁移，遇到时要求 `init-db --demo --rebuild --yes` 重建——
+当时的表名、字段与约束都不承诺兼容。
 
 ### Phase 2 — 逐模块搬运（已完成）
 
@@ -67,6 +68,9 @@ python3 make_report.py         # 生成 Markdown 报告（outputs/）
 - 只搬「框架」：题目结构、导入器、检索与推荐接口。
 - 示例题必须自制，数量控制在十几道，够演示即可。
 - 使用者的真实题库由使用者自己导入；仓库提供 `data/README.md` 说明格式。
+
+小步清单、升级策略（`phase2 → phase3` 非破坏式迁移）与每步验收见
+[PHASE3_PLAN.md](PHASE3_PLAN.md)。
 
 ### Phase 4 — 文档与发布
 

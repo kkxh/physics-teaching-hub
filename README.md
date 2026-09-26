@@ -24,8 +24,9 @@ Phase 1 的通用化地基 + Phase 2 的模块搬运都已经落地，全部使�
 - **隐私扫描**：`scripts/privacy_scan.sh` 在提交前拦住真实数据、绝对路径与凭据痕迹。
 - **持续集成**：GitHub Actions 跑测试、演示数据自检与隐私扫描。
 
-> 提醒：最小闭环用的数据库 schema 是**临时**的（`meta.schema_version = 'phase1-temp'`），
-> Phase 2 会用正式的模块化 schema 替换或扩展，表名与字段不承诺兼容。
+> 数据库 schema 已是正式版本（现为 `phase3`）。存量 `phase2` 库用
+> `python3 hub.py upgrade-db` 非破坏式升级；Phase 1 的临时库（`phase1-temp`）
+> 不自动迁移，需要 `init-db --demo --rebuild --yes` 重建。
 
 ## 学会的边界（重要）
 
@@ -125,6 +126,8 @@ python3 hub.py alert-stats                            # 预警统计
 | `demo.seed` | 演示数据的随机种子，同一份配置永远生成同一份数据 | — |
 | `demo.students_per_class` | 演示数据每班人数 | — |
 | `demo.output` | 演示数据落盘位置，默认 `demo/demo_dataset.json` | — |
+| `question_bank.tags` | 知识点标签白名单，题库导入只接受这里的标签 | — |
+| `question_bank.tag_map` | 错因标签 → 知识点标签的映射（推荐题目时用） | — |
 
 几点约定：
 

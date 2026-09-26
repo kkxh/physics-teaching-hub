@@ -3,6 +3,7 @@
 用法（全局选项放在子命令之前）：
 
     python3 hub.py init-db --demo [--rebuild --yes]
+    python3 hub.py upgrade-db
     python3 hub.py import-scores --demo
     python3 hub.py make-report
     python3 hub.py --config my.toml --db /path/to/other.db make-report
@@ -68,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--demo", action="store_true", help="导入虚构演示名单")
     init_parser.add_argument("--rebuild", action="store_true", help="删掉旧库重建")
     init_parser.add_argument("--yes", action="store_true", help="确认 --rebuild 的删除动作")
+
+    upgrade_parser = subparsers.add_parser(
+        "upgrade-db", help="把存量库升级到当前 schema（只应用迁移，不导入数据）"
+    )
+    add_global_options(upgrade_parser, suppress_defaults=True)
 
     scores_parser = subparsers.add_parser("import-scores", help="导入成绩")
     add_global_options(scores_parser, suppress_defaults=True)
@@ -761,6 +767,23 @@ def run_serve(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def run_upgrade_db(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    summary = init_db.upgrade_database(config)
+    if not summary["changed"]:
+        print(
+            f"数据库已经是最新 schema：{summary['database']}"
+            f"（{summary['to']}），不需要升级。"
+        )
+        return 0
+    if summary["migrations"]:
+        print(f"已应用迁移：{'、'.join(summary['migrations'])}")
+    print(
+        f"已升级数据库：{summary['database']}"
+        f"（{summary['from'] or '空库'} → {summary['to']}）；原有数据未改动。"
+    )
+    return 0
+
+
 def run_make_dashboard(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
     conn = db_module.connect(config.paths.database)
     try:
@@ -785,6 +808,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "init-db":
             return run_init_db(config, args)
+        if args.command == "upgrade-db":
+            return run_upgrade_db(config, args)
         if args.command == "import-scores":
             return run_import_scores(config, args)
         if args.command == "make-report":

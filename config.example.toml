@@ -101,3 +101,26 @@ error_control = 0.2
 missing_homework_threshold = 2   # 连续缺交几次触发预警
 low_average_threshold = 60       # 考试成绩平均分低于多少触发
 score_drop_threshold = 10        # 最近一次比上一次低多少分触发
+
+[question_bank]
+# 知识点标签白名单：题库导入只接受这里的标签，避免标签越写越散。
+# 下面是通用知识点的示例，换成你自己的知识体系即可。
+tags = [
+  "运动学图像",
+  "匀变速直线运动",
+  "牛顿第二定律",
+  "受力分析",
+  "机械能守恒",
+  "欧姆定律",
+  "串并联电路",
+  "实验数据处理",
+]
+
+# 错因标签 → 知识点标签的映射（推荐时用）：键取 [error_tags] 里的代码。
+# 没配映射的错因标签会被跳过（推荐理由里会说明），不影响检索。
+[question_bank.tag_map]
+model_choice = ["受力分析", "牛顿第二定律"]
+graph_reading = ["运动学图像", "实验数据处理"]
+calculation = ["匀变速直线运动", "欧姆定律"]
+expression = ["实验数据处理"]
+concept_confusion = ["牛顿第二定律", "机械能守恒", "欧姆定律"]
