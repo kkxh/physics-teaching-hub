@@ -145,6 +145,99 @@ class PrivacyScanTests(unittest.TestCase):
         self.assertIn("privacy_probe_phone.txt", worktree.stdout)
 
 
+class HistoryScanTests(unittest.TestCase):
+    """--history 模式：扫的是历史对象与提交信息，不只是当前工作区。
+
+    用临时 git 仓库做端到端验证（把脚本本身复制进去，脚本按自身位置定位仓库根）。
+    """
+
+    def make_repo(self, tmp: Path, *, init: bool = True) -> Path:
+        repo = tmp / "history-repo"
+        repo.mkdir()
+        if init:
+            run(["git", "init", "-q"], repo)
+        script = repo / "scripts" / "privacy_scan.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(SCAN, script)
+        return repo
+
+    def commit(self, repo: Path, files: dict[str, str], message: str) -> None:
+        for name, text in files.items():
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        run(["git", "add", "-A"], repo)
+        run(
+            [
+                "git",
+                "-c",
+                "user.name=tester",
+                "-c",
+                "user.email=tester@example.com",
+                "commit",
+                "-qm",
+                message,
+            ],
+            repo,
+        )
+
+    def scan(self, repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return run(["bash", "scripts/privacy_scan.sh", *args], repo)
+
+    def test_history_mode_finds_content_that_is_gone_from_the_worktree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(Path(tmp))
+            fake_phone = "1" + "38" + "1234" + "5678"
+            self.commit(repo, {"notes.txt": f"联系电话：{fake_phone}\n"}, "加一条笔记")
+            self.commit(repo, {"notes.txt": "已经清理\n"}, "清理笔记")
+
+            current = self.scan(repo)
+            history = self.scan(repo, "--history")
+
+        self.assertEqual(current.returncode, 0, msg=current.stdout + current.stderr)
+        self.assertEqual(history.returncode, 1, msg=history.stdout + history.stderr)
+        self.assertIn("历史文件版本", history.stdout)
+
+    def test_history_mode_scans_commit_messages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(Path(tmp))
+            fake_phone = "1" + "38" + "1234" + "5678"
+            self.commit(repo, {"readme.txt": "干净内容\n"}, f"联系 {fake_phone} 确认")
+
+            current = self.scan(repo)
+            history = self.scan(repo, "--history")
+
+        self.assertEqual(current.returncode, 0, msg=current.stdout + current.stderr)
+        self.assertEqual(history.returncode, 1, msg=history.stdout + history.stderr)
+        self.assertIn("提交信息", history.stdout)
+
+    def test_history_mode_finds_a_denied_path_in_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(Path(tmp))
+            self.commit(repo, {"outputs/report.md": "演示报告\n"}, "误提交一份生成物")
+            self.commit(repo, {"outputs/.keep": ""}, "把生成物清掉")
+
+            history = self.scan(repo, "--history")
+
+        self.assertEqual(history.returncode, 1, msg=history.stdout + history.stderr)
+        self.assertIn("历史提交里出现过", history.stdout)
+
+    def test_history_mode_needs_a_git_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(Path(tmp), init=False)
+
+            result = self.scan(repo, "--history")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("需要 git 仓库", result.stdout + result.stderr)
+
+    def test_history_mode_passes_on_this_repository(self):
+        result = run(["bash", str(SCAN), "--history"], ROOT)
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("历史文件版本", result.stdout)
+
+
 class ArchiveTests(unittest.TestCase):
     def test_archive_runs_the_loop_without_untracked_files(self):
         with tempfile.TemporaryDirectory() as tmp:

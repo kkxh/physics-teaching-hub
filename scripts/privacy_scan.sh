@@ -5,6 +5,7 @@
 #   bash scripts/privacy_scan.sh           # 扫描 Git 跟踪的文件（提交前的默认检查）
 #   bash scripts/privacy_scan.sh --all     # 跟踪的 + 未跟踪但没被 .gitignore 拒绝的文件（= 可能被提交的文件）
 #   bash scripts/privacy_scan.sh --strict  # 整个工作区，连 .gitignore 忽略的生成物一起扫（发布前审计用）
+#   bash scripts/privacy_scan.sh --history # 全部提交与历史文件版本（发布前审计用；需要完整 git 历史）
 #
 # 通用规则负责抓「结构性痕迹」（路径、密钥、身份证号、私有风格班号）。
 # 学校名、真实人名这类词无法通用识别，请写进 .privacy-terms.local：
@@ -55,6 +56,7 @@ fi
 files=()
 file_count=0
 mode="tracked"
+history_mode=0
 
 collect_from_git() {
   while IFS= read -r file; do
@@ -73,6 +75,43 @@ collect_from_worktree() {
     -not -path '*/__pycache__/*' | sed 's|^\./||')
 }
 
+# ---- 历史扫描（--history）----
+# 默认 / --all / --strict 都只看当前工作区或索引；「曾经提交过什么」必须单独扫。
+# 思路：路径用 git log 的全量文件名，内容用仓库里所有 blob 对象，提交信息单独过一遍。
+scan_history_paths() {
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if [[ "$path" =~ $FORBIDDEN_PATH_PATTERN ]] && ! [[ "$path" =~ $ALLOWED_PATH_PATTERN ]]; then
+      echo "[禁止入仓] 历史提交里出现过：$path"
+      status=1
+    fi
+  done < <(git log --all --pretty=format: --name-only --diff-filter=AM | sort -u)
+}
+
+scan_history_contents() {
+  local object
+  while IFS= read -r object; do
+    [[ -z "$object" ]] && continue
+    if hits=$(git cat-file -p "$object" 2>/dev/null \
+        | grep -nIE -f "$pattern_file" --binary-files=without-match); then
+      # 注意：变量后面紧挨中文标点时必须写成 ${object}，
+      # 否则 bash 3.2 会把多字节字符当成变量名的一部分（object�: unbound variable）。
+      echo "发现疑似隐私或凭据内容（历史文件版本 ${object}）："
+      echo "$hits"
+      status=1
+    fi
+  done < <(git cat-file --batch-all-objects --batch-check='%(objectname) %(objecttype)' \
+             | awk '$2 == "blob" {print $1}')
+}
+
+scan_history_messages() {
+  if hits=$(git log --all --format='%h %s%n%b' | grep -nIE -f "$pattern_file"); then
+    echo "发现疑似隐私或凭据内容（提交信息）："
+    echo "$hits"
+    status=1
+  fi
+}
+
 case "${1:-}" in
   --all)
     if [[ $has_git -eq 1 ]]; then
@@ -87,6 +126,14 @@ case "${1:-}" in
     mode="strict(整个工作区)"
     collect_from_worktree
     ;;
+  --history)
+    if [[ $has_git -ne 1 ]]; then
+      echo "[错误] --history 需要 git 仓库：当前目录不是 git 工作区，历史扫描无法执行。"
+      exit 2
+    fi
+    mode="history(全部提交与历史文件版本)"
+    history_mode=1
+    ;;
   *)
     if [[ $has_git -eq 1 ]] && [[ -n "$(git ls-files)" ]]; then
       collect_from_git
@@ -97,14 +144,15 @@ case "${1:-}" in
     ;;
 esac
 
-if [[ $file_count -eq 0 ]]; then
+if [[ $file_count -eq 0 && $history_mode -eq 0 ]]; then
   echo "没有可扫描的文件。"
   exit 0
 fi
 
 status=0
 
-for file in "${files[@]}"; do
+# bash 3.2 + set -u 下空数组的 "${arr[@]}" 会报 unbound variable，这里用 :- 兜底
+for file in "${files[@]:-}"; do
   if [[ "$file" =~ $FORBIDDEN_PATH_PATTERN ]]; then
     if [[ "$file" =~ $ALLOWED_PATH_PATTERN ]]; then
       continue
@@ -116,7 +164,7 @@ done
 
 # 内容扫描只针对磁盘上确实存在的文件（--all 模式会列出已删除但仍在索引里的路径）
 existing=()
-for file in "${files[@]}"; do
+for file in "${files[@]:-}"; do
   if [[ -f "$file" ]]; then
     existing+=("$file")
   fi
@@ -132,7 +180,9 @@ fi
 trap 'rm -f "$pattern_file"' EXIT
 printf '%s\n' "${patterns[@]}" > "$pattern_file"
 
-if [[ ${#existing[@]} -gt 0 ]]; then
+# 注意：macOS 自带 bash 3.2 在 `set -u` 下取空数组长度会报 unbound variable，
+# 所以这里显式给默认值（--history 模式下工作区文件列表本来就是空的）。
+if [[ ${#existing[@]:-0} -gt 0 ]]; then
   if hits=$(grep -nIE -f "$pattern_file" --binary-files=without-match \
       --exclude="$SELF_PATH" -- "${existing[@]}"); then
     echo "发现疑似隐私或凭据内容："
@@ -143,10 +193,21 @@ if [[ ${#existing[@]} -gt 0 ]]; then
     if (( grep_status > 1 )); then
       # grep 退出码 >1 说明扫描本身出错了（模式文件、参数、文件读取等），
       # 这种情况必须报错，不能让「检查没跑成」看起来像「检查通过」
-      echo "[错误] 隐私扫描的内容检查执行失败（grep 退出码 $grep_status）。"
+      echo "[错误] 隐私扫描的内容检查执行失败（grep 退出码 ${grep_status}）。"
       status=1
     fi
   fi
+fi
+
+if [[ $history_mode -eq 1 ]]; then
+  # 历史扫描需要完整历史（CI 的浅克隆只有 1 个提交，跑这个模式会看漏，
+  # 所以它是发布前本地审计的硬性动作，不放进 CI）
+  commit_total=$(git rev-list --all --count 2>/dev/null || echo 0)
+  blob_total=$(git cat-file --batch-all-objects --batch-check='%(objecttype)' \
+    | grep -c '^blob$' || true)
+  scan_history_paths
+  scan_history_contents
+  scan_history_messages
 fi
 
 if grep -q "<YOUR NAME>" LICENSE 2>/dev/null; then
@@ -154,7 +215,11 @@ if grep -q "<YOUR NAME>" LICENSE 2>/dev/null; then
 fi
 
 if [[ $status -eq 0 ]]; then
-  echo "隐私扫描通过：$mode 范围共 $file_count 个文件，未发现真实数据、绝对路径或凭据痕迹。"
+  if [[ $history_mode -eq 1 ]]; then
+    echo "隐私扫描通过：$mode 范围共 $commit_total 个提交 / $blob_total 个历史文件版本，未发现真实数据、绝对路径或凭据痕迹。"
+  else
+    echo "隐私扫描通过：$mode 范围共 $file_count 个文件，未发现真实数据、绝对路径或凭据痕迹。"
+  fi
 fi
 
 exit $status

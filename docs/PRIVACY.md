@@ -40,11 +40,16 @@
 bash scripts/privacy_scan.sh          # 默认：只看会被提交的文件（Git 跟踪的）
 bash scripts/privacy_scan.sh --all    # 再算上未跟踪、但没被 .gitignore 拒绝的文件
 bash scripts/privacy_scan.sh --strict # 发布前审计：整个工作区，连生成物一起看
+bash scripts/privacy_scan.sh --history # 发布前审计：全部提交与历史文件版本 + 提交信息
 ```
 
 默认与 `--all` 都应当通过——跑完最小闭环（产生 `data/*.db`、`demo/*.json`、`outputs/*.md`）之后它们依然通过，
 因为这些生成物都在 `.gitignore` 里，不会被提交。`--strict` 会把这些本机产物一并列出来提醒你，
 那是**本机产物**而不是待提交内容；发布前用它做一次全面审计。
+
+`--history` 是**发布前的硬性动作**：它遍历全部提交、所有历史文件版本（含已不在任何分支上的对象）
+与提交信息，能抓到「曾经提交过、后来删掉」的内容。它需要完整 git 历史，
+而 CI 是浅克隆，跑这个模式会看漏，所以只在发布前本地执行并留档证据。
 
 `data/` 目录除 `data/README.md` 外一律禁止入仓；`outputs/`、`demo/`、数据库文件、教学文档同理。
 
