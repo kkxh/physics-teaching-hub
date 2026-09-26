@@ -21,7 +21,10 @@
       `question-handout.png`，全部来自演示数据；逐张人工核对：姓名均为「学生NN」、
       班级为示例班名、无本机路径与窗口痕迹，见 PHASE4_PLAN §5）
 - [x] A11 版本口径统一：README 顶部与 CHANGELOG 都写 `v0.1.0-alpha`
-- [ ] A12 四条绿灯 + `--history` 再跑一遍，确认干净
+- [x] A12 终检（2026-09-26，HEAD `a986b7d`，截图入仓后重跑）：`compileall` OK；
+      433 个用例在 Asia/Shanghai 与 `TZ=UTC` 下各全绿（27 skip 为环境性）；
+      `seed_demo_data.py --check` 通过；隐私扫描四档全过
+      （tracked 82 / worktree 82 / strict 83 个文件；history 44 个提交 / 337 个历史文件版本）
 
 ## B. R5 评审（异步，转公开之前）
 
