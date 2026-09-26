@@ -150,7 +150,7 @@ bash scripts/privacy_scan.sh --history   # 全部提交与历史文件版本 + �
 
 ---
 
-## 5. P4.3 演示材料（`docs/screenshots/`）
+## 5. P4.3 演示材料（`docs/screenshots/`）（已完成 2026-09-26）
 
 - 内容：看板、周报、题目讲义各一张；数据全部来自 `seed_demo_data.py`（虚构）。
 - 机制：看板是单文件 HTML，用无头浏览器（本机 playwright 可用）打开 `outputs/dashboard/index.html` 截图；
@@ -218,6 +218,7 @@ bash scripts/privacy_scan.sh --history   # 全部提交与历史文件版本 + �
 | 依赖许可清单 | `docs/THIRD_PARTY_LICENSES.md` | 运行时唯一第三方 `openpyxl`（MIT，可选安装）；其余全部标准库 |
 | LICENSE | `LICENSE` 首行 | `MIT License` / `Copyright (c) 2026 DW YE`，无占位符 |
 | 新机器可跑性 | `tests/test_repo_hygiene.ArchiveTests` | `git archive HEAD` 解包后跑通 quickstart + 题库命令（`list-questions` / `recommend-questions` / `make-handout` ×2），退出码全 0 |
+| 演示截图 | `docs/screenshots/` 三张 | 看板 1440×1348、周报 1200×1069、题目讲义 1200×896；全部由演示数据生成，逐张人工核对无真实姓名/学校/本机路径 |
 | 全量回归 | `python3 -m unittest discover -s tests -t .` 与 `TZ=UTC …` | 各 **433 个用例全绿**（27 个 skip 是环境性的：沙箱不许绑回环端口、未装 `openpyxl`；CI 上都会实跑） |
 | CI | GitHub Actions | `32ed70e` 首推暴露一个 bash 3.2/4-5 差异（内容检查静默跳过），修于 `ad95143`，CI 转绿（run 36219007903） |
 
@@ -289,3 +290,7 @@ python3 hub.py make-report
 9. 2026-09-26：R5 评审闭环（结论「无阻塞项」）；P4.1 README、P4.2 架构说明、P4.4 发布文件落地
    （`CHANGELOG.md`、`CONTRIBUTING.md`、`docs/RELEASE_CHECKLIST.md`），README 版本口径升到 `v0.1.0-alpha`。
    余下 P4.3 截图与 A12 复核，然后才进入需要维护者批准的 P4.5。
+10. 2026-09-26：P4.3 截图落地（`docs/screenshots/`）。截图用无头浏览器渲染演示数据产物：
+    三份产物先在临时工作目录用 `--demo` 生成，周报与讲义套一层文档样式后截图，
+    画布按页面内容高度精确设定（避免 full-page 拼接伪影）；截图前逐张人工核对。
+    下一步只剩 A12 终检，之后是 P4.5（转公开 → tag → Release，需维护者逐项批准）。

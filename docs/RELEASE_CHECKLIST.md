@@ -17,8 +17,9 @@
 - [x] A7 陌生人 README（含 30 秒 quickstart、隐私 FAQ、非目标）
 - [x] A8 架构说明：[ARCHITECTURE.md](ARCHITECTURE.md)
 - [x] A9 发布文件：`CHANGELOG.md`、`CONTRIBUTING.md`、本文件
-- [ ] A10 截图入仓：`docs/screenshots/`（看板 / 周报 / 题目讲义各一张，全部来自演示数据；
-      入仓前逐张人工核对，见 PHASE4_PLAN §5）
+- [x] A10 截图入仓：`docs/screenshots/`（`dashboard.png` / `weekly-report.png` /
+      `question-handout.png`，全部来自演示数据；逐张人工核对：姓名均为「学生NN」、
+      班级为示例班名、无本机路径与窗口痕迹，见 PHASE4_PLAN §5）
 - [x] A11 版本口径统一：README 顶部与 CHANGELOG 都写 `v0.1.0-alpha`
 - [ ] A12 四条绿灯 + `--history` 再跑一遍，确认干净
 

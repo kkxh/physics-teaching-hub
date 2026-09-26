@@ -30,6 +30,23 @@ python3 hub.py make-dashboard           # 生成单文件看板：outputs/dashbo
 只有读 Excel `.xlsx` 成绩表时才需要 `python3 -m pip install -r requirements.txt`
 （`openpyxl`，MIT，见 [docs/THIRD_PARTY_LICENSES.md](docs/THIRD_PARTY_LICENSES.md)）。
 
+## 界面预览
+
+下面三张图都由**演示数据**生成（`init-db --demo` + `import-questions --demo`）：姓名一律是「学生NN」，
+班级是示例班名——仓库里没有任何真实数据。
+
+**教学看板**（`hub.py make-dashboard` 产出的单文件 HTML，双击即开）：
+
+![教学看板：班级/学生/考试/未解决预警四张卡片，考试平均分、作业完成率、未解决预警三张表](docs/screenshots/dashboard.png)
+
+**周报**（`hub.py weekly-report --week 2026-W44` 产出的 Markdown）：
+
+![周报：按教学周汇总考试、作业、错因与预警](docs/screenshots/weekly-report.png)
+
+**题目讲义**（`hub.py make-handout --question-keys …` 组卷，默认不含答案与解析）：
+
+![题目讲义：三道自制示例题，标注题型、难度、知识点与来源](docs/screenshots/question-handout.png)
+
 ## 它解决什么问题
 
 - **一个库装下整个学期**：成绩（CSV / Excel，含小题得分）、作业与订正、错因与行为记录，
