@@ -51,6 +51,7 @@ bash scripts/privacy_scan.sh --all
 
 - **R5**：P4.0 完成后、**转公开之前** —— 评审「全历史扫描证据 + 依赖许可清单 + git 历史卫生 + LICENSE」，
   无阻塞项才允许执行转公开。评审只发本仓库内容（公开精简版代码与虚构数据）。
+  **2026-09-26 已闭环：结论「无阻塞项，审计证据足以支撑转公开」。**
 
 ---
 
@@ -126,7 +127,7 @@ bash scripts/privacy_scan.sh --history   # 全部提交与历史文件版本 + �
 
 ---
 
-## 3. P4.1 陌生人 README
+## 3. P4.1 陌生人 README（已完成 2026-09-26）
 
 现在的 README 是维护者视角（「Phase N 完成了什么」）。第一次点进来的物理老师需要的是：
 
@@ -141,7 +142,7 @@ bash scripts/privacy_scan.sh --history   # 全部提交与历史文件版本 + �
 
 ---
 
-## 4. P4.2 架构说明（`docs/ARCHITECTURE.md`）
+## 4. P4.2 架构说明（`docs/ARCHITECTURE.md`）（已完成 2026-09-26）
 
 写清三件事：模块依赖（谁 import 谁、为什么没有循环）、数据流向
 （配置 → 数据层 `db.py` → 各模块 → 报告/看板/API）、隐私边界（什么进仓库、什么永不进）。
@@ -161,7 +162,7 @@ bash scripts/privacy_scan.sh --history   # 全部提交与历史文件版本 + �
 
 ---
 
-## 6. P4.4 发布文件
+## 6. P4.4 发布文件（已完成 2026-09-26）
 
 - `CHANGELOG.md`：`v0.1.0-alpha` 功能摘要（Phase 1–3 的能力）+ **已知限制**
   （单一学段示例配置、题库不含图片题与 PDF 导入、推荐是规则推荐、无多用户）。
@@ -225,6 +226,12 @@ bash scripts/privacy_scan.sh --history   # 全部提交与历史文件版本 + �
 **已知限制（写进 R5 材料）**：历史里的旧提交仍署名 `Dio <yedw31@gmail.com>`——
 按决策四 A 只改未来提交，不重写历史。
 
+**R5 评审结论（2026-09-26，hira 静态评审）**：六项审计逐项通过，无阻塞项，证据足以支撑转公开；
+转公开 → tag v0.1.0-alpha → Release 的执行由维护者决定。两个非阻塞观察：
+① `--history` 的内容扫描里单个 blob 读取失败时静默跳过（worktree 路径有 grep 退出码检查，
+ history 路径没有）；② 护栏用例只禁了 `${#arr[@]:-` 变体。回归测试 433 全绿采信执行者证据
+（hira 未独立运行）。
+
 ---
 
 ## 待定清单
@@ -279,3 +286,6 @@ python3 hub.py make-report
 7. **核对初稿的三处事实**：依赖只有可选 `openpyxl`（MIT）、LICENSE 已署名 `DW YE`、
    CI 无 secrets 引用——全部属实，照写。
 8. 记录四条决策（推广力度 A、身份公开度 A、静置 3–7 天 A、提交者邮箱 A）与 R5 评审点位置。
+9. 2026-09-26：R5 评审闭环（结论「无阻塞项」）；P4.1 README、P4.2 架构说明、P4.4 发布文件落地
+   （`CHANGELOG.md`、`CONTRIBUTING.md`、`docs/RELEASE_CHECKLIST.md`），README 版本口径升到 `v0.1.0-alpha`。
+   余下 P4.3 截图与 A12 复核，然后才进入需要维护者批准的 P4.5。

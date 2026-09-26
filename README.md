@@ -1,65 +1,80 @@
 # 物理教学中枢（Physics Teaching Hub）
 
-面向中学物理教师的本地教学数据中枢：把课堂记录、作业与订正、错因、学生画像、阶段巡检和练习推荐放进同一个本地数据库，由命令行与本地看板驱动，数据不出本机。
+**给中学物理老师的本地教学数据中枢**：把课堂记录、作业与订正、错因、学生画像、考试分析、
+题库与讲义放进同一个本地数据库，由命令行和一份可以双击打开的看板驱动。
+**数据不出本机**，不需要服务器、不需要联网，只要 Python 3.11+。
 
-> **当前状态：v0.0.1，Phase 3（题库与教材隔离）已完成。**
-> 本仓库是作者私有教学系统的开源精简版，正在按 [docs/ROADMAP.md](docs/ROADMAP.md) 逐步搬运通用能力。
-> 功能会**长期落后于**内部版本，这是预期状态，不是缺陷；接口也会随搬运调整。
+> **状态：v0.1.0-alpha（早期版本）**。本仓库是作者私有教学系统的开源精简版，
+> 功能会**长期落后于**内部版本，这是预期状态而不是缺陷；接口也会随搬运调整。
+> 路线见 [docs/ROADMAP.md](docs/ROADMAP.md)，搬运进度与差异见 [docs/MIGRATION_LEDGER.md](docs/MIGRATION_LEDGER.md)。
 
 ---
 
-## 现在能做什么
-
-Phase 1 的通用化地基 + Phase 2 的模块搬运 + Phase 3 的题库框架都已经落地，全部使用虚构演示数据：
-
-- **配置外置**：学段、学科、学期、课表、班级、数据库路径都由 `config.toml` 决定，见下方「配置」。
-- **文案外置**：学科名、学段名、阶段名、常用术语与演示提示语都放在 `labels/zh-CN.toml`，代码里只出现 key，见下方「文案」。
-- **虚构演示数据生成器**：`seed_demo_data.py` 生成完全虚构的班级、学生、成绩与作业记录。
-- **最小闭环**：`hub.py init-db --demo` → `import-scores --demo` → `make-report`，产出 `outputs/phase1_report.md`。
-- **导入**：成绩（CSV / Excel）、作业提交、小题得分，都支持列名映射与 `--dry-run` 预览。
-- **记录**：错因（标签字典可扩展）与行为记录；写操作走「预览 → `--yes` → 单事务」。
-- **分析**：学生画像（成绩水平/作业习惯/错因控制 + 综合分，支持增量重算）、作业完成率（转班学生不吃亏的口径）、考试逐题分析（得分率/难度/区分度）。
-- **输出**：周报、阶段巡检、考试分析、讲评讲义（不含试卷原题）、可离线双击打开的本地看板。
-- **题库**：题目（题型/题干/选项/答案/解析/难度/知识点标签）支持 JSON / CSV / 仓库自制示例题三种导入方式；按标签、题型、难度、关键词检索；按错因标签 × 画像难度档给出带理由的推荐；可按 key 或按推荐组卷成题目讲义（默认不含答案）。**题目是使用者数据**：仓库只带 12 道自制示例题，题库本身只存在本机。
-- **升级**：`hub.py upgrade-db` 把存量 `phase2` 库非破坏式升到当前 schema（只跑迁移，不删库）。
-- **本地 API**：只读 GET、只绑 `127.0.0.1`、CORS 白名单，见下方。
-- **隐私扫描**：`scripts/privacy_scan.sh` 在提交前拦住真实数据、绝对路径与凭据痕迹。
-- **持续集成**：GitHub Actions 跑测试、演示数据自检与隐私扫描。
-
-> 数据库 schema 已是正式版本（现为 `phase3`）。存量 `phase2` 库用
-> `python3 hub.py upgrade-db` 非破坏式升级；Phase 1 的临时库（`phase1-temp`）
-> 不自动迁移，需要 `init-db --demo --rebuild --yes` 重建。
-
-## 学会的边界（重要）
-
-- 本仓库**不包含任何真实学生数据**：没有真实姓名、成绩、课堂记录、班级或学校标识。
-- 本仓库**不包含任何第三方教辅、教材、试卷或题目图片**。示例题必须自制。
-- 演示数据全部来自 `seed_demo_data.py`，可以随时重新生成、随时删除。
-
-细节见 [docs/PRIVACY.md](docs/PRIVACY.md)。
-
-## 快速开始
+## 30 秒上手（虚构演示数据，不装依赖、不改配置）
 
 ```bash
 git clone https://github.com/kkxh/physics-teaching-hub.git
 cd physics-teaching-hub
 
-# 三条命令跑通最小闭环（虚构演示数据；没复制配置也能跑，会用 config.example.toml）
-python3 hub.py init-db --demo                # 建库 + 灌入虚构名单
-python3 hub.py import-scores --demo          # 导入演示成绩
-python3 hub.py make-report                   # 生成报告：outputs/phase1_report.md
+python3 hub.py init-db --demo           # 建库 + 写入虚构班级与学生
+python3 hub.py import-scores --demo     # 导入虚构成绩与小题得分
+python3 hub.py make-report              # 生成报告：outputs/phase1_report.md
 
-# 自检
-python3 -m unittest discover -s tests -t .   # 跑测试
-python3 seed_demo_data.py                    # 生成虚构演示数据（没 config.toml 时用示例配置）
-python3 seed_demo_data.py --check            # 演示数据自检
-bash scripts/privacy_scan.sh                 # 隐私扫描
+# 想看看题库与看板：
+python3 hub.py import-questions --demo  # 导入仓库自带的 12 道自制示例题
+python3 hub.py list-questions           # 检索题目（答案默认隐藏）
+python3 hub.py make-dashboard           # 生成单文件看板：outputs/dashboard/index.html
 ```
 
-需要 Python 3.11 或更高版本（配置解析使用标准库 `tomllib`）；最小闭环只用标准库，不需要安装依赖。
+需要 Python 3.11 或更高版本（配置解析用标准库 `tomllib`）。上面这些命令**只用标准库**；
+只有读 Excel `.xlsx` 成绩表时才需要 `python3 -m pip install -r requirements.txt`
+（`openpyxl`，MIT，见 [docs/THIRD_PARTY_LICENSES.md](docs/THIRD_PARTY_LICENSES.md)）。
 
-`hub.py` 是 Phase 2 起的统一入口：全局选项 `--config` / `--db` 放在子命令之前
-（例如 `python3 hub.py --db /tmp/isolated.db make-report` 可以把读写指向一个隔离库）。
+## 它解决什么问题
+
+- **一个库装下整个学期**：成绩（CSV / Excel，含小题得分）、作业与订正、错因与行为记录，
+  都进同一个 SQLite 文件，字段口径统一（比如完成率只按「作业所属班级的当前学生」算）。
+- **从数据到下一步动作**：学生画像（成绩水平 / 作业习惯 / 错因控制 + 综合分）、
+  预警与跟进闭环、周报、阶段巡检、考试逐题分析（得分率 / 难度 / 区分度）与讲评讲义。
+- **题库只搬框架**：题目（题型 / 题干 / 选项 / 答案 / 解析 / 难度 / 知识点标签）自己导入，
+  支持按标签、题型、难度、关键词检索，按错因标签 × 画像难度档推荐，并可组卷成讲义。
+  仓库里只有 12 道**自制**示例题，使用者自己的题库永远留在本机。
+- **能直接分享的产物**：报告与看板只写相对路径，可以拷给学生或同行看；看板是单文件 HTML，双击即开。
+
+## 数据在哪里，隐私边界怎么划
+
+- 数据库、演示数据、报告、看板都落在你的工作目录（默认 `data/`、`demo/`、`outputs/`），
+  而且都被 `.gitignore` 拒绝——不会进版本库，也不会被上传。
+- 本仓库**不含任何真实学生数据**（姓名、学号、成绩、班级、学校），
+  也**不含任何第三方试卷、教辅或教材内容**；演示数据由 `seed_demo_data.py` 生成，示例题全部自制。
+- 你自己的题库、成绩与课堂记录只应留在本机；提交任何东西前先跑 `bash scripts/privacy_scan.sh`。
+- 程序本身不联网、无遥测、没有账号体系；唯一的联网场景是你自己 `pip install` 依赖。
+
+细节见 [docs/PRIVACY.md](docs/PRIVACY.md)。
+
+## 现在能做什么
+
+- **配置外置**：学段、学科、学期、课表、班级、数据库路径都由 `config.toml` 决定，见下方「配置」。
+- **文案外置**：学科名、学段名、阶段名、常用术语与演示提示语都放在 `labels/zh-CN.toml`，代码里只出现 key。
+- **虚构演示数据生成器**：`seed_demo_data.py` 生成完全虚构的班级、学生、成绩、作业与示例题。
+- **最小闭环**：`hub.py init-db --demo` → `import-scores --demo` → `make-report`。
+- **导入**：成绩（CSV / Excel）、作业提交、小题得分、题库（JSON / CSV），都支持列名映射与 `--dry-run` 预览。
+- **记录**：错因（标签字典可扩展）与行为记录；写操作走「预览 → `--yes` → 单事务」。
+- **分析**：学生画像（支持增量重算）、作业完成率、考试逐题分析。
+- **输出**：周报、阶段巡检、考试分析、讲评讲义（不含试卷原题）、题目讲义（默认不含答案）、可离线打开的本地看板。
+- **题库**：检索（标签 / 题型 / 难度 / 关键词，答案默认隐藏）、推荐（错因标签 × 画像难度档，带可解释理由，纯只读）、组卷讲义；题目是使用者数据，仓库只带自制示例题。
+- **升级**：`hub.py upgrade-db` 把存量 `phase2` 库非破坏式升到当前 schema（只跑迁移，不删库）。
+- **本地 API**：只读 GET、只绑 `127.0.0.1`、CORS 白名单，见下方。
+- **隐私扫描**：`scripts/privacy_scan.sh` 在提交前拦住真实数据、绝对路径与凭据痕迹，另有 `--history` 扫全部 Git 历史。
+- **持续集成**：GitHub Actions 跑测试、演示数据自检与隐私扫描（Python 3.11 与 3.14）。
+
+> 数据库 schema 现为 `phase3`。存量 `phase2` 库用 `python3 hub.py upgrade-db` 升级；
+> Phase 1 的临时库（`phase1-temp`）不自动迁移，需要 `init-db --demo --rebuild --yes` 重建。
+
+## 常用命令
+
+`hub.py` 是统一入口：全局选项 `--config` / `--db` 放在子命令之前
+（例如 `python3 hub.py --db /tmp/isolated.db make-report` 把读写指向一个隔离库）。
 Phase 1 的三个脚本 `init_db.py` / `import_scores.py` / `make_report.py` 仍然可用，它们只是 `hub.py` 的兼容垫片。
 
 导入自己的成绩表（列约定见 [data/README.md](data/README.md)）：
@@ -143,7 +158,7 @@ python3 hub.py alert-stats                            # 预警统计
 几点约定：
 
 - 环境变量只认上表列出的几个名字；白名单之外的 `PHYSICS_TEACHING_*` 一律忽略，避免配置来源不可追踪。
-- 换配置文件位置用 `PHYSICS_TEACHING_CONFIG=/path/to/config.toml`（Phase 1 后续命令会补 `--config` 参数）。
+- 换配置文件位置用 `PHYSICS_TEACHING_CONFIG=/path/to/config.toml`。
 - 配置不合法会直接报错并指出字段名：学段、时区、日期格式、学期起止先后、课表起点晚于学期结束、空班名、重复班名、上课日取值等都会被拦下。
 
 ### 路径与时间
@@ -152,7 +167,7 @@ python3 hub.py alert-stats                            # 预警统计
 - 数据库目录与输出目录不存在时，首次运行会自动创建。使用者数据的存放约定见 [data/README.md](data/README.md)。
 - 一周从周一开始：`schedule.starts_on` 所在的那一周是第 1 教学周。学期范围之外的日期不算教学周；学期已开始但还没到课表起点时记为第 0 周（未开课）。
 - 上课日由 `schedule.weekdays` 决定（1=周一 … 7=周日）；「今天」按 `project.timezone` 计算，不依赖机器本地时区。
-- Phase 1 不处理节假日与调休。
+- 不处理节假日与调休。
 
 ### 教学阶段
 
@@ -181,9 +196,44 @@ ends_on = "2026-11-06"
 - 考试与作业日期按学期进度自动落点（`[[demo.exams]]` 的 `progress` 是 0~1 的学期进度），永远落在 `[semester]` 范围内，不用手改日期。
 - 生成结果只写在本机（默认 `demo/`，已在 `.gitignore` 里）；姓名一律是「前缀 + 两位序号」的虚构样式，自检会拦住不符合模式的姓名。
 
-## 长期路线
+## 常见问题
 
-见 [docs/ROADMAP.md](docs/ROADMAP.md)。搬运进度记录在 [docs/MIGRATION_LEDGER.md](docs/MIGRATION_LEDGER.md)。
+**数据会上传吗？** 不会。程序不联网、没有服务端、没有遥测；所有数据只写在你自己机器上的 SQLite 文件与输出目录里。
+
+**要联网吗？** 运行不需要。只有想用 Excel 导入时要自己 `pip install` 一次依赖；用 CSV 则完全不用装东西。
+
+**我的成绩和题库会被公开吗？** 不会。仓库里没有任何使用者数据；数据库、导入文件、输出物都在 `.gitignore` 的拒绝清单里。你自己的题库放哪里由你决定，只要别提交进 Git。
+
+**我能导入自己的试卷吗？** 能，但只能导入**你有权使用**的内容；仓库不附带也不分发任何第三方试卷、教辅或教材内容，当前也不解析 PDF 与图片题（题面是纯文本）。
+
+**支持初中吗？** 支持。`[project] stage` 设成 `middle_school`，阶段与文案就会换成初中那一套；班级、学期、课表都由配置决定。
+
+**为什么功能看起来不多？** 因为它先是作者自己在用的工具，公开的是精简版；上游私仓不会同步到本仓库，功能长期落后是预期状态。
+
+## 测试与自检
+
+```bash
+python3 -m compileall -q .
+python3 -m unittest discover -s tests -t .   # 测试只用临时库与虚构数据，不碰真实数据
+TZ=UTC python3 -m unittest discover -s tests -t .
+python3 seed_demo_data.py --check            # 演示数据自检
+bash scripts/privacy_scan.sh                 # 隐私扫描（提交前）
+bash scripts/privacy_scan.sh --all
+bash scripts/privacy_scan.sh --history       # 扫全部 Git 历史（发布前审计用）
+```
+
+## 不做什么（非目标）
+
+- 多用户、权限、云端同步：不做。这是个**单机工具**。
+- 在线题库与题库同步、图片题与公式渲染：不做（题面纯文本）。
+- PDF / Word 题目导入：待定，不承诺。
+- 英文文档、视频教程：暂不做。
+- 功能追赶上游：不追，见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+
+## 长期路线与参与
+
+- 路线与阶段：[docs/ROADMAP.md](docs/ROADMAP.md)；搬运进度与与上游的差异：[docs/MIGRATION_LEDGER.md](docs/MIGRATION_LEDGER.md)。
+- 想提 PR 请先看 [CONTRIBUTING.md](CONTRIBUTING.md)（隐私红线是硬门槛）；版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证与免责声明
 
