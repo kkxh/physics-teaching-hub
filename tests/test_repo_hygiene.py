@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -143,6 +144,19 @@ class PrivacyScanTests(unittest.TestCase):
         worktree = self.run_scan("--all")
         self.assertEqual(worktree.returncode, 1, msg=worktree.stdout + worktree.stderr)
         self.assertIn("privacy_probe_phone.txt", worktree.stdout)
+
+
+    def test_privacy_scan_avoids_bash4_incompatible_array_length(self):
+        """护栏：`${#arr[@]:-0}` 在 macOS 的 bash 3.2 能跑，在 Linux 的 bash 4/5 上是
+        bad substitution——脚本会继续跑、还报「通过」，等于内容检查静默跳过
+        （R3-4 与 P4.0 的 CI 各踩过一次）。统一改用计数器变量。
+
+        同理，`${#arr[@]}`（不带默认值）在 bash 3.2 + `set -u` 下遇到空数组会报 unbound variable。
+        """
+        text = SCAN.read_text(encoding="utf-8")
+
+        bad = re.findall(r"\$\{#[A-Za-z_][A-Za-z0-9_]*\[@\]:-", text)
+        self.assertEqual(bad, [], msg=f"这些写法在 bash 4/5 上是 bad substitution：{bad}")
 
 
 class HistoryScanTests(unittest.TestCase):

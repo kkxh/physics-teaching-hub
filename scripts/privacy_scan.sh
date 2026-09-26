@@ -162,11 +162,15 @@ for file in "${files[@]:-}"; do
   fi
 done
 
-# 内容扫描只针对磁盘上确实存在的文件（--all 模式会列出已删除但仍在索引里的路径）
+# 内容扫描只针对磁盘上确实存在的文件（--all 模式会列出已删除但仍在索引里的路径）。
+# 这里用计数器而不是「数组长度」判断：macOS 自带 bash 3.2 在 set -u 下对空数组取长度会报
+# unbound variable，而给长度加默认值的写法在 Linux 的 bash 4/5 上又是 bad substitution。
 existing=()
+existing_count=0
 for file in "${files[@]:-}"; do
   if [[ -f "$file" ]]; then
     existing+=("$file")
+    existing_count=$((existing_count + 1))
   fi
 done
 
@@ -180,9 +184,7 @@ fi
 trap 'rm -f "$pattern_file"' EXIT
 printf '%s\n' "${patterns[@]}" > "$pattern_file"
 
-# 注意：macOS 自带 bash 3.2 在 `set -u` 下取空数组长度会报 unbound variable，
-# 所以这里显式给默认值（--history 模式下工作区文件列表本来就是空的）。
-if [[ ${#existing[@]:-0} -gt 0 ]]; then
+if [[ $existing_count -gt 0 ]]; then
   if hits=$(grep -nIE -f "$pattern_file" --binary-files=without-match \
       --exclude="$SELF_PATH" -- "${existing[@]}"); then
     echo "发现疑似隐私或凭据内容："
