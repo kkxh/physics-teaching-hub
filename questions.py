@@ -34,6 +34,19 @@ EXAMPLE_QUESTIONS_PATH = Path(__file__).resolve().parent / "examples" / "questio
 MAX_EXAMPLE_QUESTIONS = 15
 # CSV 里选项与标签的分隔符
 LIST_SEPARATOR = "|"
+# 题型显示名（CLI 用）：与错因标签一样，代码里放一份 code → 显示名的字典
+QTYPE_LABELS: Mapping[str, str] = {
+    "choice": "选择题",
+    "fill": "填空题",
+    "calculation": "计算题",
+    "experiment": "实验题",
+    "other": "其他",
+}
+# 检索一次最多返回多少道（防止把整库拉进终端）
+DEFAULT_LIST_LIMIT = 20
+MAX_LIST_LIMIT = 200
+# 列表里的题干摘要长度
+STEM_EXCERPT_LENGTH = 60
 
 # 题目导入的 CSV 表头约定（可用 --columns 覆盖）
 DEFAULT_QUESTION_COLUMNS: Mapping[str, str] = {
@@ -216,6 +229,129 @@ def fetch_questions(conn: sqlite3.Connection, question_keys: Sequence[str]) -> l
 def count_questions(conn: sqlite3.Connection) -> int:
     """题库里的题目数量。"""
     return int(conn.execute("SELECT COUNT(*) AS n FROM questions").fetchone()["n"])
+
+
+def qtype_label(qtype: str) -> str:
+    """题型代码 → 显示名；不认识的代码原样返回（不吞掉信息）。"""
+    return QTYPE_LABELS.get(qtype, qtype)
+
+
+def search_questions(
+    conn: sqlite3.Connection,
+    *,
+    tag: str | None = None,
+    qtype: str | None = None,
+    difficulty: int | None = None,
+    keyword: str | None = None,
+    limit: int = DEFAULT_LIST_LIMIT,
+) -> list[Question]:
+    """按标签 / 题型 / 难度 / 关键词检索题目。
+
+    关键词只在 `question_key` 与题干里匹配，**不搜答案与解析**——
+    否则答案里的字眼会从检索结果里漏出去。
+
+    没有匹配时返回空列表；题库为空也不是错误（「没有数据 ≠ 差数据」，NOTES 第 13 条）。
+    """
+    tag = (tag or "").strip() or None
+    qtype = (qtype or "").strip() or None
+    keyword = (keyword or "").strip() or None
+
+    if qtype is not None and qtype not in QTYPES:
+        raise config_loader.ConfigError(
+            f"题型只能是 {'、'.join(QTYPES)}；收到：{qtype!r}。"
+        )
+    if difficulty is not None and not DIFFICULTY_MIN <= int(difficulty) <= DIFFICULTY_MAX:
+        raise config_loader.ConfigError(
+            f"难度只能是 {DIFFICULTY_MIN}-{DIFFICULTY_MAX}；收到：{difficulty!r}。"
+        )
+    if limit is None or int(limit) < 1:
+        raise config_loader.ConfigError("返回条数至少为 1。")
+    if int(limit) > MAX_LIST_LIMIT:
+        raise config_loader.ConfigError(
+            f"返回条数最多 {MAX_LIST_LIMIT}；一次别取太多，可以缩小筛选条件。"
+        )
+
+    conditions: list[str] = []
+    params: list[Any] = []
+    if tag is not None:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM question_tags qt "
+            "WHERE qt.question_id = q.id AND qt.tag = ?)"
+        )
+        params.append(tag)
+    if qtype is not None:
+        conditions.append("q.qtype = ?")
+        params.append(qtype)
+    if difficulty is not None:
+        conditions.append("q.difficulty = ?")
+        params.append(int(difficulty))
+    if keyword is not None:
+        # 转义 % 与 _，让用户输入按字面匹配（NOTES 第 5 条）
+        pattern = f"%{importer.escape_like(keyword)}%"
+        conditions.append(
+            "(q.question_key LIKE ? ESCAPE '\\' OR q.stem LIKE ? ESCAPE '\\')"
+        )
+        params.extend([pattern, pattern])
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    rows = conn.execute(
+        f"SELECT {_QUESTION_COLUMNS} FROM questions q{where} "
+        "ORDER BY q.question_key LIMIT ?",
+        (*params, int(limit)),
+    ).fetchall()
+    return [_row_to_question(conn, row) for row in rows]
+
+
+def as_public_dict(question: Question) -> dict[str, Any]:
+    """对外字段（本地 API、看板）：**不含答案与解析**。
+
+    本地 API 没有鉴权，答案只走 CLI 的显式 `--show-answer` 开关。
+    """
+    return {
+        "question_key": question.question_key,
+        "qtype": question.qtype,
+        "stem": question.stem,
+        "difficulty": question.difficulty,
+        "source_label": question.source_label,
+        "tags": list(question.tags),
+    }
+
+
+def format_questions(
+    questions: Sequence[Question],
+    *,
+    show_answer: bool = False,
+    stem_length: int = STEM_EXCERPT_LENGTH,
+) -> str:
+    """把检索结果排成 Markdown 表格；答案默认不出现，`show_answer` 才加两列。"""
+    header = ["题目", "题型", "难度", "知识点", "题干"]
+    if show_answer:
+        header += ["答案", "解析"]
+
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join("---" for _ in header) + " |",
+    ]
+    for question in questions:
+        row = [
+            question.question_key,
+            qtype_label(question.qtype),
+            "—" if question.difficulty is None else str(question.difficulty),
+            "、".join(question.tags) or "—",
+            _excerpt(question.stem, stem_length),
+        ]
+        if show_answer:
+            row += [question.answer, question.analysis or "—"]
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+
+def _excerpt(text: str, length: int) -> str:
+    """把题干压成单行摘要：换行折成空格，超长截断加省略号。"""
+    flat = " ".join(text.split())
+    if length <= 0 or len(flat) <= length:
+        return flat
+    return flat[:length] + "…"
 
 
 @dataclass(frozen=True)

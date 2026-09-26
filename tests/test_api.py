@@ -13,6 +13,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+from http import HTTPStatus
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,7 @@ import api as api_module  # noqa: E402
 import config_loader  # noqa: E402
 import import_scores  # noqa: E402
 import init_db  # noqa: E402
+import questions as questions_module  # noqa: E402
 
 CONFIG_TEXT = """
 [semester]
@@ -40,6 +42,9 @@ names = ["高一(A)班", "高一(B)班"]
 
 [demo]
 students_per_class = 3
+
+[question_bank]
+tags = ["运动学图像", "匀变速直线运动", "牛顿第二定律", "受力分析", "机械能守恒", "欧姆定律", "串并联电路", "实验数据处理"]
 """
 
 
@@ -165,6 +170,91 @@ class EndpointTests(ApiTestCase):
         status, _headers, resolved = self.request("/api/alerts?status=resolved")
         self.assertEqual(status, 200)
         self.assertEqual(resolved, [])
+
+
+class QuestionDispatchTests(unittest.TestCase):
+    """题库检索端点：直接调 dispatch，不依赖绑定端口（沙箱里也能跑）。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name)
+        self.config_path = self.base / "config.toml"
+        self.config_path.write_text(CONFIG_TEXT, encoding="utf-8")
+        self.config = config_loader.load_config(self.config_path, env={})
+        init_db.init_database(self.config)
+        questions_module.import_questions(self.config, demo=True)
+        self.conn = init_db.connect(self.config.paths.database)
+        self.addCleanup(self.conn.close)
+
+    def dispatch(self, query: str = "") -> object:
+        return api_module.dispatch(
+            self.config, self.conn, "/api/questions", urllib.parse.parse_qs(query)
+        )
+
+    def test_returns_public_fields_only(self):
+        payload = self.dispatch("limit=3")
+
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual(len(payload["items"]), 3)
+        for item in payload["items"]:
+            with self.subTest(question=item["question_key"]):
+                self.assertNotIn("answer", item)
+                self.assertNotIn("analysis", item)
+                self.assertIn("stem", item)
+                self.assertIn("tags", item)
+
+    def test_filters_by_tag_type_and_keyword(self):
+        by_tag = self.dispatch("tag=" + urllib.parse.quote("欧姆定律"))
+        self.assertGreaterEqual(by_tag["count"], 1)
+        self.assertTrue(all("欧姆定律" in item["tags"] for item in by_tag["items"]))
+
+        by_type = self.dispatch("type=choice")
+        self.assertTrue(by_type["items"])
+        self.assertTrue(all(item["qtype"] == "choice" for item in by_type["items"]))
+
+        by_keyword = self.dispatch("q=demo-exp-paper-tape")
+        self.assertEqual(by_keyword["count"], 1)
+        self.assertEqual(by_keyword["items"][0]["question_key"], "demo-exp-paper-tape-accel")
+
+    def test_bad_parameters_are_400(self):
+        for query in ("difficulty=9", "difficulty=abc", "limit=0", "type=essay"):
+            with self.subTest(query=query):
+                with self.assertRaises(api_module.ApiError) as ctx:
+                    self.dispatch(query)
+                self.assertEqual(ctx.exception.status, HTTPStatus.BAD_REQUEST)
+
+    def test_unknown_route_is_404(self):
+        with self.assertRaises(api_module.ApiError) as ctx:
+            api_module.dispatch(self.config, self.conn, "/api/没有这个", {})
+
+        self.assertEqual(ctx.exception.status, HTTPStatus.NOT_FOUND)
+
+
+class QuestionEndpointTests(ApiTestCase):
+    """走真实 HTTP 的题库端点（沙箱不允许绑端口时会跳过，CI 上会跑）。"""
+
+    def setUp(self):
+        super().setUp()
+        questions_module.import_questions(self.config, demo=True)
+
+    def test_questions_endpoint_lists_without_answers(self):
+        status, _headers, payload = self.request("/api/questions?limit=3")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["count"], 3)
+        self.assertNotIn("answer", payload["items"][0])
+        self.assertNotIn("analysis", payload["items"][0])
+
+    def test_questions_endpoint_filters_and_rejects_bad_params(self):
+        status, _headers, payload = self.request("/api/questions?type=choice")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["items"])
+        self.assertTrue(all(item["qtype"] == "choice" for item in payload["items"]))
+
+        bad_status, _headers, bad_payload = self.request("/api/questions?difficulty=9")
+        self.assertEqual(bad_status, 400)
+        self.assertIn("error", bad_payload)
 
 
 class ErrorTests(ApiTestCase):

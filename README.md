@@ -95,7 +95,8 @@ python3 hub.py alert-stats                            # 预警统计
 
 本地 API 只做只读 GET，供看板前端或本地脚本查询：
 `/api/meta`、`/api/classes`、`/api/exams`、`/api/exam/{exam_key}/stats`、
-`/api/class/{班名}/averages`、`/api/homework/stats`、`/api/alerts?status=open|resolved|all`。
+`/api/class/{班名}/averages`、`/api/homework/stats`、`/api/alerts?status=open|resolved|all`、
+`/api/questions?tag=&type=&difficulty=&q=&limit=`（题库检索，不回答案与解析）。
 只绑定 `127.0.0.1`；CORS 只回固定的本机 Origin（含实际端口）并带 `Vary: Origin`，不使用通配符。
 
 看板生成在 `outputs/dashboard/`：`index.html` 里**内嵌**了数据，双击就能看（不需要起服务、不引用任何 CDN）；

@@ -5,6 +5,7 @@
     python3 hub.py init-db --demo [--rebuild --yes]
     python3 hub.py upgrade-db
     python3 hub.py import-questions (--json 文件 | --csv 文件 | --demo)
+    python3 hub.py list-questions [--tag 标签] [--keyword 关键词]
     python3 hub.py import-scores --demo
     python3 hub.py make-report
     python3 hub.py --config my.toml --db /path/to/other.db make-report
@@ -92,6 +93,30 @@ def build_parser() -> argparse.ArgumentParser:
         help='CSV 表头映射，如 "题号=question_key,知识点=tags"',
     )
     questions_parser.add_argument("--dry-run", action="store_true", help="只预览，不写库")
+
+    list_questions_parser = subparsers.add_parser(
+        "list-questions", help="检索题目（答案默认隐藏）"
+    )
+    add_global_options(list_questions_parser, suppress_defaults=True)
+    list_questions_parser.add_argument("--tag", default=None, help="按知识点标签精确匹配")
+    list_questions_parser.add_argument(
+        "--type",
+        default=None,
+        help=f"题型：{'/'.join(questions_module.QTYPES)}",
+    )
+    list_questions_parser.add_argument("--difficulty", type=int, default=None, help="难度 1-5")
+    list_questions_parser.add_argument(
+        "--keyword", default=None, help="关键词（匹配题目标识与题干）"
+    )
+    list_questions_parser.add_argument(
+        "--limit",
+        type=int,
+        default=questions_module.DEFAULT_LIST_LIMIT,
+        help=f"最多返回多少道，默认 {questions_module.DEFAULT_LIST_LIMIT}",
+    )
+    list_questions_parser.add_argument(
+        "--show-answer", action="store_true", help="显示答案与解析（默认隐藏）"
+    )
 
     scores_parser = subparsers.add_parser("import-scores", help="导入成绩")
     add_global_options(scores_parser, suppress_defaults=True)
@@ -833,6 +858,45 @@ def run_import_questions(config: config_loader.AppConfig, args: argparse.Namespa
     return 0
 
 
+def run_list_questions(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    if not config.paths.database.is_file():
+        raise config_loader.ConfigError(
+            f"还没有数据库：{config.paths.database}；"
+            "请先运行 python3 hub.py init-db --demo，再用 import-questions 导入题库。"
+        )
+
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        if questions_module.count_questions(conn) == 0:
+            print(
+                "题库为空：先跑 python3 hub.py import-questions --demo，"
+                "或用 --json / --csv 导入你自己的题库。"
+            )
+            return 0
+        items = questions_module.search_questions(
+            conn,
+            tag=args.tag,
+            qtype=args.type,
+            difficulty=args.difficulty,
+            keyword=args.keyword,
+            limit=args.limit,
+        )
+    finally:
+        conn.close()
+
+    if not items:
+        print("没有匹配的题目：放宽标签 / 题型 / 难度，或者换个关键词再试。")
+        return 0
+
+    print(questions_module.format_questions(items, show_answer=args.show_answer))
+    if args.show_answer:
+        print(f"共 {len(items)} 道（含答案与解析）。")
+    else:
+        print(f"共 {len(items)} 道；答案默认隐藏，加 --show-answer 才显示。")
+    return 0
+
+
 def run_make_dashboard(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
     conn = db_module.connect(config.paths.database)
     try:
@@ -861,6 +925,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_upgrade_db(config, args)
         if args.command == "import-questions":
             return run_import_questions(config, args)
+        if args.command == "list-questions":
+            return run_list_questions(config, args)
         if args.command == "import-scores":
             return run_import_scores(config, args)
         if args.command == "make-report":

@@ -3,9 +3,10 @@
 > 状态：**已定稿（2026-09-26）**——维护者已确认三处决策：升级路径走「真迁移」（决策一 A）、
 > 自制示例题放顶层 `examples/`（决策二 A）、示例题由执行者起草、维护者审物理正确性（决策三 A）；
 > 评审保持单点 R4。Phase 2 已于 2026-09-25 收口（P2.0～P2.10 全部落地，R1/R2/R3 已闭环）；
-> P3.0 与 P3.1 已于 2026-09-26 落地（题库 schema + 数据层 + 非破坏式升级链路；
-> 导入器 + 自制示例题集，演示数据集升到 `demo.v7`）。示例题初稿待维护者复核物理正确性
-> （决策三 A），复核意见按修订记录追加。
+> P3.0～P3.2 已于 2026-09-26 落地（题库 schema + 数据层 + 非破坏式升级链路；
+> 导入器 + 自制示例题集，演示数据集升到 `demo.v7`；检索 CLI 与只读 API）。
+> 示例题已于 2026-09-26 经维护者人工核对
+> 物理正确性通过（决策三 A 闭环），见修订记录第 11 条。
 > 范围锚点：[ROADMAP.md](ROADMAP.md) 的 Phase 3。本文件只细化步骤，不扩大范围；
 > Phase 4（文档与发布）不在本计划内。
 >
@@ -185,7 +186,7 @@ questions.sql: questions(id, question_key TEXT UNIQUE NOT NULL, qtype TEXT NOT N
 
 ---
 
-## 3. P3.1 题目导入器 + 自制示例题集（已完成 2026-09-26，示例题待维护者复核）
+## 3. P3.1 题目导入器 + 自制示例题集（已完成 2026-09-26，示例题物理正确性已复核通过）
 
 ### 导入器
 
@@ -205,7 +206,7 @@ questions.sql: questions(id, question_key TEXT UNIQUE NOT NULL, qtype TEXT NOT N
   四种题型，难度 1–5 尽量拉开，每题 1–3 个知识点标签（必须在白名单内）。
 - `examples/README.md`：原创声明、编写日期、格式说明与「只能导入你有权使用的内容」的提醒
   （题集本身保持纯 JSON，不写注释）。
-- 示例题由执行者起草，**维护者过一遍物理正确性**后合入（决策三 A）。
+- 示例题由执行者起草，维护者已于 2026-09-26 人工核对物理正确性通过后合入（决策三 A 闭环，见修订记录第 11 条）。
 - `seed_demo_data.py`：按配置种子确定性生成示例题数据（复用示例题集内容），`--check`
   校验题目数量、标签合法性与两次生成一致性；`DATASET_VERSION` 从 `demo.v6` 升到 `demo.v7`。
 
@@ -224,7 +225,7 @@ questions.sql: questions(id, question_key TEXT UNIQUE NOT NULL, qtype TEXT NOT N
 
 ---
 
-## 4. P3.2 检索接口
+## 4. P3.2 检索接口（已完成 2026-09-26）
 
 - CLI：`hub.py list-questions [--tag 标签] [--type 题型] [--difficulty 1-5] [--keyword 关键词] [--limit N]`；
   输出 `question_key` / 题型 / 难度 / 标签 / 题干摘要（题干只显示前 60 字）；
@@ -394,3 +395,5 @@ GET /api/questions/recommend?student_uid=
 9. 补上 P3.3 的难度分档对照表；把「题号 ↔ 题库题目暂不关联」写进待定清单。
 10. 修正文件引用（`tests/test_exam_chain.py`）与 PHASE2_PLAN 修订条目的引用措辞；
     补上原稿漏掉的 `config_loader.py`（`[question_bank]` 要落成配置字段才算数）。
+11. 2026-09-26：维护者人工核对 12 道自制示例题的物理正确性，全部通过（决策三 A 闭环）。
+    题集按附录 B 第 4 条保持纯文本、无配图（图片题不在 Phase 3 范围内，见 §1 非目标）。

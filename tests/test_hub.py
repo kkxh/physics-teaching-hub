@@ -226,8 +226,8 @@ QUESTION_TAGS = (
 )
 
 
-class ImportQuestionsCommandTests(HubCliTestCase):
-    """P3.1：import-questions 的来源校验、dry-run 与演示导入。"""
+class QuestionCommandTestCase(HubCliTestCase):
+    """题库相关子命令共用的准备：带 [question_bank] 白名单的配置 + 题目计数。"""
 
     def questions_config(self) -> Path:
         # 放在与原配置同一个目录，相对路径（data/physics.db）才解析到同一个库
@@ -244,6 +244,10 @@ class ImportQuestionsCommandTests(HubCliTestCase):
             return int(conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0])
         finally:
             conn.close()
+
+
+class ImportQuestionsCommandTests(QuestionCommandTestCase):
+    """P3.1：import-questions 的来源校验、dry-run 与演示导入。"""
 
     def test_source_is_required(self):
         config_path = self.questions_config()
@@ -274,6 +278,90 @@ class ImportQuestionsCommandTests(HubCliTestCase):
         again = self.run_hub("--config", str(config_path), "import-questions", "--demo")
         self.assertEqual(again.returncode, 2)
         self.assertIn("已经有", again.stderr)
+
+
+class ListQuestionsCommandTests(QuestionCommandTestCase):
+    """P3.2：list-questions 的过滤、答案隐藏与空库提示。"""
+
+    def prepare(self) -> Path:
+        config_path = self.questions_config()
+        self.run_hub("--config", str(config_path), "init-db", "--demo")
+        result = self.run_hub("--config", str(config_path), "import-questions", "--demo")
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        return config_path
+
+    def test_empty_bank_gives_an_actionable_hint(self):
+        config_path = self.questions_config()
+        self.run_hub("--config", str(config_path), "init-db", "--demo")
+
+        result = self.run_hub("--config", str(config_path), "list-questions")
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("题库为空", result.stdout)
+        self.assertIn("import-questions", result.stdout)
+
+    def test_missing_database_is_actionable(self):
+        config_path = self.questions_config()
+
+        result = self.run_hub("--config", str(config_path), "list-questions")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("init-db", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_answers_are_hidden_unless_asked(self):
+        config_path = self.prepare()
+
+        hidden = self.run_hub(
+            "--config", str(config_path), "list-questions", "--limit", "3"
+        )
+        self.assertEqual(hidden.returncode, 0, msg=hidden.stdout + hidden.stderr)
+        self.assertIn("答案默认隐藏", hidden.stdout)
+        self.assertNotIn("| 答案 |", hidden.stdout)
+
+        shown = self.run_hub(
+            "--config", str(config_path), "list-questions", "--limit", "3", "--show-answer"
+        )
+        self.assertEqual(shown.returncode, 0, msg=shown.stdout + shown.stderr)
+        self.assertIn("| 答案 | 解析 |", shown.stdout)
+
+    def test_filters_and_keyword(self):
+        config_path = self.prepare()
+
+        by_type = self.run_hub(
+            "--config", str(config_path), "list-questions", "--type", "choice"
+        )
+        self.assertEqual(by_type.returncode, 0, msg=by_type.stdout + by_type.stderr)
+        self.assertIn("选择题", by_type.stdout)
+        self.assertNotIn("计算题", by_type.stdout)
+
+        by_keyword = self.run_hub(
+            "--config", str(config_path), "list-questions", "--keyword", "打点计时器"
+        )
+        self.assertIn("demo-exp-paper-tape-accel", by_keyword.stdout)
+
+        by_tag = self.run_hub(
+            "--config", str(config_path), "list-questions", "--tag", "欧姆定律"
+        )
+        self.assertIn("demo-fill-ohm", by_tag.stdout)
+        self.assertNotIn("demo-exp-paper-tape-accel", by_tag.stdout)
+
+        no_match = self.run_hub(
+            "--config", str(config_path), "list-questions", "--keyword", "不存在的关键词"
+        )
+        self.assertEqual(no_match.returncode, 0)
+        self.assertIn("没有匹配的题目", no_match.stdout)
+
+    def test_bad_difficulty_is_reported_without_traceback(self):
+        config_path = self.prepare()
+
+        result = self.run_hub(
+            "--config", str(config_path), "list-questions", "--difficulty", "9"
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("难度", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 class ShimTests(HubCliTestCase):

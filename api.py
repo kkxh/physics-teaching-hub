@@ -28,6 +28,7 @@ import config_loader
 import db as db_module
 import exam as exam_module
 import homework as homework_module
+import questions as questions_module
 import teaching_calendar
 
 DEFAULT_HOST = "127.0.0.1"
@@ -57,6 +58,7 @@ ROUTES: tuple[Route, ...] = (
     Route(re.compile(r"^/api/class/(?P<class_name>[^/]+)/averages$"), "class_averages"),
     Route(re.compile(r"^/api/homework/stats$"), "homework_stats"),
     Route(re.compile(r"^/api/alerts$"), "alerts"),
+    Route(re.compile(r"^/api/questions$"), "questions"),
 )
 
 
@@ -222,6 +224,53 @@ def build_alerts(conn: sqlite3.Connection, status: str | None) -> list[dict[str,
     ]
 
 
+def _query_int(query: Mapping[str, list[str]], name: str) -> int | None:
+    """取一个整数查询参数；给了但不是整数就 400。"""
+    raw = (query.get(name) or [None])[0]
+    if raw is None or str(raw).strip() == "":
+        return None
+    text = str(raw).strip()
+    text = text[1:] if text.startswith("+") else text
+    if not text.lstrip("-").isdigit():
+        raise ApiError(HTTPStatus.BAD_REQUEST, f"{name} 必须是整数；收到：{raw!r}")
+    return int(text)
+
+
+def build_questions(
+    conn: sqlite3.Connection,
+    query: Mapping[str, list[str]],
+) -> dict[str, Any]:
+    """题库检索（只读）。
+
+    **不回答案与解析**：本地 API 没有鉴权，答案只走 CLI 的 `--show-answer`。
+    """
+
+    def first(name: str) -> str | None:
+        raw = (query.get(name) or [None])[0]
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        return text or None
+
+    limit = _query_int(query, "limit")
+    try:
+        items = questions_module.search_questions(
+            conn,
+            tag=first("tag"),
+            qtype=first("type"),
+            difficulty=_query_int(query, "difficulty"),
+            keyword=first("q"),
+            limit=questions_module.DEFAULT_LIST_LIMIT if limit is None else limit,
+        )
+    except config_loader.ConfigError as exc:
+        raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+
+    return {
+        "count": len(items),
+        "items": [questions_module.as_public_dict(item) for item in items],
+    }
+
+
 def dispatch(
     config: config_loader.AppConfig,
     conn: sqlite3.Connection,
@@ -252,6 +301,8 @@ def dispatch(
         if route.handler == "alerts":
             status = (query.get("status") or [None])[0]
             return build_alerts(conn, status)
+        if route.handler == "questions":
+            return build_questions(conn, query)
 
     raise ApiError(HTTPStatus.NOT_FOUND, f"没有这个接口：{path}")
 

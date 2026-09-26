@@ -430,6 +430,143 @@ class QuestionImportTests(unittest.TestCase):
         self.assertEqual(self.tag_count(), 0)
 
 
+class QuestionSearchTests(unittest.TestCase):
+    """P3.2 检索：过滤条件、关键词转义、答案默认隐藏。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name)
+        self.config = make_config(self.base)
+        config_loader.ensure_directories(self.config)
+        self.conn = init_db.connect(self.config.paths.database)
+        self.addCleanup(self.conn.close)
+        init_db.apply_schema(self.conn)
+        with self.conn:
+            questions.insert_question(
+                self.conn,
+                questions.Question(
+                    question_key="s-1",
+                    qtype="choice",
+                    stem="用欧姆定律求通过电阻的电流",
+                    answer="B",
+                    options=("A. 1 A", "B. 2 A"),
+                    analysis="由 I = U / R 得。",
+                    difficulty=2,
+                    tags=("欧姆定律",),
+                ),
+            )
+            questions.insert_question(
+                self.conn,
+                questions.Question(
+                    question_key="s-2",
+                    qtype="calculation",
+                    stem="求串联电路的总电阻",
+                    answer="20 Ω",
+                    difficulty=4,
+                    tags=("串并联电路",),
+                ),
+            )
+            questions.insert_question(
+                self.conn,
+                questions.Question(
+                    question_key="s-3",
+                    qtype="fill",
+                    stem="字面匹配 100% 与 a_b",
+                    answer="占位答案",
+                    tags=("欧姆定律",),
+                ),
+            )
+            questions.insert_question(
+                self.conn,
+                questions.Question(
+                    question_key="s-4",
+                    qtype="fill",
+                    stem="这道题没有标难度",
+                    answer="占位答案",
+                    tags=("欧姆定律",),
+                ),
+            )
+
+    def keys(self, **filters: Any) -> list[str]:
+        return [
+            item.question_key
+            for item in questions.search_questions(self.conn, **filters)
+        ]
+
+    def test_filters_by_tag_type_and_difficulty(self):
+        self.assertEqual(self.keys(tag="欧姆定律"), ["s-1", "s-3", "s-4"])
+        self.assertEqual(self.keys(qtype="calculation"), ["s-2"])
+        self.assertEqual(self.keys(difficulty=2), ["s-1"])
+        self.assertEqual(self.keys(tag="欧姆定律", qtype="fill"), ["s-3", "s-4"])
+
+    def test_keyword_matches_key_and_stem_only(self):
+        self.assertEqual(self.keys(keyword="串联"), ["s-2"])
+        self.assertEqual(self.keys(keyword="s-3"), ["s-3"])
+        # 关键词不搜答案：s-2 的答案是「20 Ω」，但题干里没有，所以搜不到
+        self.assertEqual(self.keys(keyword="20 Ω"), [])
+
+    def test_like_wildcards_are_matched_literally(self):
+        self.assertEqual(self.keys(keyword="100%"), ["s-3"])
+        self.assertEqual(self.keys(keyword="a_b"), ["s-3"])
+        self.assertEqual(self.keys(keyword="%"), ["s-3"], msg="% 应按字面匹配，不能通配")
+        self.assertEqual(self.keys(keyword="_"), ["s-3"], msg="_ 应按字面匹配，不能通配")
+
+    def test_limit_keeps_a_stable_order(self):
+        self.assertEqual(self.keys(limit=2), ["s-1", "s-2"])
+        self.assertEqual(self.keys(limit=1), ["s-1"])
+
+    def test_unmarked_difficulty_is_not_matched_by_a_difficulty_filter(self):
+        for level in range(1, 6):
+            with self.subTest(difficulty=level):
+                self.assertNotIn("s-4", self.keys(difficulty=level))
+
+        table = questions.format_questions(questions.search_questions(self.conn, keyword="没有标难度"))
+        self.assertIn("—", table)
+
+    def test_invalid_filters_are_rejected(self):
+        cases = (
+            {"qtype": "essay"},
+            {"difficulty": 0},
+            {"difficulty": 6},
+            {"limit": 0},
+            {"limit": questions.MAX_LIST_LIMIT + 1},
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                with self.assertRaises(config_loader.ConfigError):
+                    questions.search_questions(self.conn, **case)
+
+    def test_public_dict_hides_answer_and_analysis(self):
+        item = questions.search_questions(self.conn, keyword="s-1")[0]
+
+        payload = questions.as_public_dict(item)
+
+        self.assertNotIn("answer", payload)
+        self.assertNotIn("analysis", payload)
+        self.assertEqual(payload["question_key"], "s-1")
+        self.assertEqual(payload["tags"], ["欧姆定律"])
+
+    def test_format_hides_answers_unless_asked(self):
+        items = questions.search_questions(self.conn, keyword="s-1")
+
+        hidden = questions.format_questions(items)
+        shown = questions.format_questions(items, show_answer=True)
+
+        self.assertNotIn("| 答案 |", hidden)
+        self.assertNotIn("由 I = U / R 得。", hidden)
+        self.assertIn("| 答案 | 解析 |", shown)
+        self.assertIn("由 I = U / R 得。", shown)
+        self.assertEqual(hidden.count("\n"), 2, msg="一道题应只占表头两行 + 一行")
+
+    def test_format_excerpt_is_single_line_and_truncated(self):
+        item = questions.search_questions(self.conn, keyword="s-2")[0]
+
+        table = questions.format_questions([item], stem_length=4)
+
+        self.assertIn("求串联电…", table)
+
+
 class ExampleQuestionSetTests(unittest.TestCase):
     """仓库自带的示例题集必须自制、够用、且与示例配置的白名单一致。"""
 
