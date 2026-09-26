@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -20,6 +21,14 @@ LOOP_COMMANDS = (
     ("init_db.py", ("--demo",)),
     ("import_scores.py", ()),
     ("make_report.py", ()),
+)
+# 文档里那条 hub.py quickstart（含 Phase 3 的题库命令）：这就是「陌生人 clone 下来」的验收
+QUICKSTART_COMMANDS = (
+    ("init-db", "--demo"),
+    ("import-scores", "--demo"),
+    ("import-questions", "--demo"),
+    ("list-questions",),
+    ("make-report",),
 )
 
 DATABASE = ROOT / "data" / "physics_teaching.db"
@@ -278,6 +287,68 @@ class ArchiveTests(unittest.TestCase):
             self.assertTrue(report.is_file())
             self.assertIn("教学周", report.read_text(encoding="utf-8"))
 
+    def test_archive_runs_the_documented_quickstart_with_the_question_bank(self):
+        """P4.0 §2.5：解包 HEAD 后按文档跑一遍（含题库命令）——「陌生人 clone 能跑通」的可复跑证据。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "extract"
+            target.mkdir()
+            extract_archive(target)
+
+            for command in QUICKSTART_COMMANDS:
+                result = run([sys.executable, str(target / "hub.py"), *command], target)
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    msg=f"{command} 失败：{result.stdout}{result.stderr}",
+                )
+
+            conn = sqlite3.connect(target / "data" / "physics_teaching.db")
+            try:
+                student_uid = str(
+                    conn.execute(
+                        "SELECT student_uid FROM students ORDER BY id LIMIT 1"
+                    ).fetchone()[0]
+                )
+            finally:
+                conn.close()
+
+            follow_ups = (
+                ("list-questions", "--tag", "欧姆定律"),
+                ("recommend-questions", "--student", student_uid, "--limit", "2"),
+                ("make-handout", "--recommend-for", student_uid, "--limit", "2"),
+                ("make-handout", "--question-keys", "demo-fill-ohm"),
+            )
+            for command in follow_ups:
+                result = run([sys.executable, str(target / "hub.py"), *command], target)
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    msg=f"{command} 失败：{result.stdout}{result.stderr}",
+                )
+
+            listing = run(
+                [
+                    sys.executable,
+                    str(target / "hub.py"),
+                    "list-questions",
+                    "--tag",
+                    "欧姆定律",
+                    "--show-answer",
+                ],
+                target,
+            )
+            self.assertEqual(listing.returncode, 0, msg=listing.stdout + listing.stderr)
+            self.assertIn("demo-fill-ohm", listing.stdout)
+            self.assertIn("| 答案 |", listing.stdout)
+
+            handouts = sorted((target / "outputs").glob("handout_questions_*.md"))
+            self.assertGreaterEqual(len(handouts), 2, msg="组卷讲义没落盘")
+            text = handouts[0].read_text(encoding="utf-8")
+            self.assertIn("题目讲义", text)
+            self.assertNotIn("## 答案与解析", text, msg="默认不该附答案")
+            self.assertNotIn("/Users/", text)
+            self.assertNotIn(str(target), text)
+
 
 class TrackedFileTests(unittest.TestCase):
     def test_tracked_files_avoid_the_deny_list(self):
@@ -294,6 +365,8 @@ class TrackedFileTests(unittest.TestCase):
         ]
 
         self.assertEqual(offenders, [])
+
+
 
     def test_archive_does_not_contain_generated_paths(self):
         with tempfile.TemporaryDirectory() as tmp:

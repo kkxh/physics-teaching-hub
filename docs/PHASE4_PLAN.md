@@ -204,6 +204,29 @@ bash scripts/privacy_scan.sh --history   # 全部提交与历史文件版本 + �
 
 ---
 
+## 9. P4.0 执行证据（2026-09-26）
+
+执行人：Codex。相关提交：`32ed70e`（P4.0 主体）、`ad95143`（CI 暴露的跨平台问题修复）。
+
+| 项目 | 命令 / 位置 | 结果 |
+| --- | --- | --- |
+| 全历史隐私扫描 | `bash scripts/privacy_scan.sh --history` | **通过**：40 个提交 / 321 个历史文件版本（含已不可达对象）与全部提交信息，未发现真实数据、绝对路径或凭据痕迹 |
+| 工作区扫描三档 | `privacy_scan.sh` / `--all` / `--strict` | 全部通过（tracked 75 / worktree 75 / strict 76 个文件） |
+| 历史扫描反向用例 | `tests/test_repo_hygiene.HistoryScanTests` | 3 条能抓到（历史内容、提交信息、历史禁用路径）+ 非 git 目录退出码 2 |
+| 提交者身份 | `git log -1 --format='%an <%ae>'` | `kkxh <kkxh@users.noreply.github.com>`（决策四 A，自 P4.0 提交起生效） |
+| 依赖许可清单 | `docs/THIRD_PARTY_LICENSES.md` | 运行时唯一第三方 `openpyxl`（MIT，可选安装）；其余全部标准库 |
+| LICENSE | `LICENSE` 首行 | `MIT License` / `Copyright (c) 2026 DW YE`，无占位符 |
+| 新机器可跑性 | `tests/test_repo_hygiene.ArchiveTests` | `git archive HEAD` 解包后跑通 quickstart + 题库命令（`list-questions` / `recommend-questions` / `make-handout` ×2），退出码全 0 |
+| 全量回归 | `python3 -m unittest discover -s tests -t .` 与 `TZ=UTC …` | 各 **433 个用例全绿**（27 个 skip 是环境性的：沙箱不许绑回环端口、未装 `openpyxl`；CI 上都会实跑） |
+| CI | GitHub Actions | `32ed70e` 首推暴露一个 bash 3.2/4-5 差异（内容检查静默跳过），修于 `ad95143`，CI 转绿（run 36219007903） |
+
+**R5 待审材料**：本表 + `--history` 原始输出 + `docs/THIRD_PARTY_LICENSES.md` + 身份检查结果 + 新机器冒烟结果。
+
+**已知限制（写进 R5 材料）**：历史里的旧提交仍署名 `Dio <yedw31@gmail.com>`——
+按决策四 A 只改未来提交，不重写历史。
+
+---
+
 ## 待定清单
 
 | 编号 | 事项 | 结论 |
