@@ -305,3 +305,7 @@ python3 hub.py make-report
     **两点提醒**：①GitHub 的 secret scanning 与 push protection 目前是关的（公开仓库可免费开），
     建议在 Settings → Code security 里打开，作为 `--history` 审计之外的持续兜底；
     ②历史里的旧提交仍署名 `Dio <yedw31@gmail.com>`，公开后已永久可见——按决策四 A 不重写历史。
+12. 2026-09-27：发布材料先行备好（**未打 tag、未建 Release**，等维护者明确批准）：
+    GitHub Release 正文底稿落到 `docs/RELEASE_NOTES_v0.1.0-alpha.md`（面向读者：这是什么、
+    能做什么、30 秒上手、隐私设计、已知限制、反馈方式），社区帖草稿另存 `/tmp` 待用
+    （静置期结束后再发，只用 `kkxh` / `DW YE` 身份）。C3/C4 仍停在待批准状态。

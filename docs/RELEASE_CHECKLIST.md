@@ -42,7 +42,8 @@
       重写历史需批准」；`docs/ROADMAP.md` 的远端、推送政策、发布节奏改为已公开，
       两条发布前硬性待办标记为已完成；README 的 clone 地址公开后已可直接使用。
 - [ ] C3 打 tag `v0.1.0-alpha`（维护者操作）
-- [ ] C4 创建 GitHub Release，正文取 `CHANGELOG.md` 的摘要 + 已知限制（维护者操作）
+- [ ] C4 创建 GitHub Release，正文用 [RELEASE_NOTES_v0.1.0-alpha.md](RELEASE_NOTES_v0.1.0-alpha.md)
+      （底稿已写好）+ 链接 `CHANGELOG.md`（维护者操作）
 - [ ] C5 Release 页可选：30 秒录屏（只允许演示数据；放不放由维护者定）
 
 ## D. 静置期（决策三 A：3–7 天）
