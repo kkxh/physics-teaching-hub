@@ -309,3 +309,9 @@ python3 hub.py make-report
     GitHub Release 正文底稿落到 `docs/RELEASE_NOTES_v0.1.0-alpha.md`（面向读者：这是什么、
     能做什么、30 秒上手、隐私设计、已知限制、反馈方式），社区帖草稿另存 `/tmp` 待用
     （静置期结束后再发，只用 `kkxh` / `DW YE` 身份）。C3/C4 仍停在待批准状态。
+13. 2026-09-27：维护者批准后执行 C3/C4——打注解 tag `v0.1.0-alpha`（指向 `6b6de06`，
+    tagger `kkxh`）并创建 GitHub Release（正文取 RELEASE_NOTES，四张图用 tag 固定 raw 链接，
+    均 200；**标记为 pre-release**，避免 alpha 被当成稳定版）。
+    另新增 `docs/screenshots/social-preview.png`（1280×640，看板截图 + 标题版式），
+    供维护者上传到 GitHub Social preview。**发布完成，进入静置期**：
+    自公开日 2026-09-27 起 3–7 天（约 09-30 ～ 10-04），期间只观察 CI 与反馈，不推广。

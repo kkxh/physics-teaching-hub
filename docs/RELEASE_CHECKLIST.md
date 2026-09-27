@@ -41,9 +41,16 @@
       `AGENTS.md` 第 3.7 条改为「已于 2026-09-27 转为公开；打 tag / 发 Release / 转回私有 /
       重写历史需批准」；`docs/ROADMAP.md` 的远端、推送政策、发布节奏改为已公开，
       两条发布前硬性待办标记为已完成；README 的 clone 地址公开后已可直接使用。
-- [ ] C3 打 tag `v0.1.0-alpha`（维护者操作）
-- [ ] C4 创建 GitHub Release，正文用 [RELEASE_NOTES_v0.1.0-alpha.md](RELEASE_NOTES_v0.1.0-alpha.md)
-      （底稿已写好）+ 链接 `CHANGELOG.md`（维护者操作）
+- [x] C3 打 tag `v0.1.0-alpha`（2026-09-27）：注解 tag，指向提交 `6b6de06`，
+      tagger = `kkxh`；已推送
+- [x] C4 创建 GitHub Release（2026-09-27，维护者批准后执行）：
+      <https://github.com/kkxh/physics-teaching-hub/releases/tag/v0.1.0-alpha>，
+      正文取 [RELEASE_NOTES_v0.1.0-alpha.md](RELEASE_NOTES_v0.1.0-alpha.md)，
+      四张图用 tag 固定的 raw 链接（均返回 HTTP 200）；
+      **标记为 pre-release**（alpha 语义，避免被当成稳定版）；author = `kkxh`
+- [ ] E0 GitHub 仓库设置（维护者操作，可随时做）：上传
+      `docs/screenshots/social-preview.png` 作为 Social preview 图（1280×640）；
+      建议顺手在 Settings → Code security 打开 secret scanning / push protection
 - [ ] C5 Release 页可选：30 秒录屏（只允许演示数据；放不放由维护者定）
 
 ## D. 静置期（决策三 A：3–7 天）
