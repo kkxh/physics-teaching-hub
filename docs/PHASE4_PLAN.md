@@ -177,11 +177,11 @@ bash scripts/privacy_scan.sh --history   # 全部提交与历史文件版本 + �
 
 顺序固定，不可跳步：
 
-1. 维护者批准后**转公开**（GitHub 仓库设置）；
-2. 打 tag `v0.1.0-alpha`；
-3. 创建 GitHub Release（正文取 CHANGELOG 的摘要 + 已知限制）。
+1. 维护者批准后**转公开**（GitHub 仓库设置）——**2026-09-27 已执行**（核对结果见修订记录第 11 条）；
+2. 打 tag `v0.1.0-alpha`（待维护者批准）；
+3. 创建 GitHub Release（正文取 CHANGELOG 的摘要 + 已知限制，待维护者批准）。
 
-转公开后的**收尾同步**（否则文档会自相矛盾）：
+转公开后的**收尾同步**（否则文档会自相矛盾）——**2026-09-27 已完成**：
 
 - `AGENTS.md` 第 3.7 条「本仓库当前是私有仓库……」→ 改成公开后的推送/发布政策；
 - `docs/ROADMAP.md`「远端……当前为私有仓库」「发布节奏：Phase 4 完成后才把仓库转为公开」
@@ -296,3 +296,12 @@ python3 hub.py make-report
     A12 终检已于同日完成（HEAD `a986b7d`：433 个用例两种时区全绿、seed 自检通过、
     隐私扫描四档全过，history 覆盖 44 个提交 / 337 个历史文件版本）。
     **发布准备到此结束**；下一步是 P4.5（转公开 → tag → Release，需维护者逐项批准）。
+11. 2026-09-27：维护者执行 C1 **转公开**。核对结果：`visibility=public`、`default_branch=main`、
+    只有 `main` 一个分支、尚无 tag 与 Release、LICENSE 被 GitHub 识别为 MIT、
+    本地 HEAD 与 `origin/main` 一致（`e3272f9`，即 R5 审计通过的那个提交）；
+    维护者还顺手填了仓库 description 与 topics（`physics` / `education` / `local-first` /
+    `python` / `sqlite` / `chinese` / `teaching-tools`）。
+    同日完成 C2 文案同步（`AGENTS.md` 3.7、`docs/ROADMAP.md` 的远端/推送政策/发布节奏/硬性待办）。
+    **两点提醒**：①GitHub 的 secret scanning 与 push protection 目前是关的（公开仓库可免费开），
+    建议在 Settings → Code security 里打开，作为 `--history` 审计之外的持续兜底；
+    ②历史里的旧提交仍署名 `Dio <yedw31@gmail.com>`，公开后已永久可见——按决策四 A 不重写历史。
