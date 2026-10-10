@@ -22,6 +22,7 @@ from typing import Any, Mapping, Sequence
 
 import config_loader
 import db as db_module
+import embedder as embedder_module
 import importer
 import seed_demo_data
 
@@ -590,6 +591,35 @@ def format_questions(
     return "\n".join(lines)
 
 
+def format_similar_questions(
+    scored: Sequence[tuple[Question, float]],
+    *,
+    show_answer: bool = False,
+    stem_length: int = STEM_EXCERPT_LENGTH,
+) -> str:
+    """把相似题结果排成 Markdown 表格（含相似度列）；答案默认不出现。"""
+    header = ["相似度", "题目", "题型", "难度", "知识点", "题干"]
+    if show_answer:
+        header += ["答案", "解析"]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join("---" for _ in header) + " |",
+    ]
+    for question, score in scored:
+        row = [
+            f"{score:.3f}",
+            question.question_key,
+            qtype_label(question.qtype),
+            "—" if question.difficulty is None else str(question.difficulty),
+            "、".join(question.tags) or "—",
+            _excerpt(question.stem, stem_length),
+        ]
+        if show_answer:
+            row += [question.answer, question.analysis or "—"]
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+
 def _excerpt(text: str, length: int) -> str:
     """把题干压成单行摘要：换行折成空格，超长截断加省略号。"""
     flat = " ".join(text.split())
@@ -779,6 +809,197 @@ def apply_import_plan(conn: sqlite3.Connection, plan: QuestionImportPlan) -> dic
     return {"imported": len(plan.questions), "total": count_questions(conn)}
 
 
+def embed_question_vectors(
+    conn: sqlite3.Connection,
+    questions: Sequence[Question],
+    embedder: embedder_module.Embedder,
+) -> int:
+    """给一批题目生成向量并写入 question_embeddings（单事务）。
+
+    按 question_key 回查 id；同一道题重复向量化时覆盖旧行。
+    返回成功写入的行数。
+    """
+    if not questions:
+        return 0
+    ids: list[int] = []
+    for question in questions:
+        row = conn.execute(
+            "SELECT id FROM questions WHERE question_key = ?", (question.question_key,)
+        ).fetchone()
+        if row is None:
+            raise config_loader.ConfigError(
+                f"题目 {question.question_key!r} 不在库里，无法写向量；"
+                "请先正常导入再向量化。"
+            )
+        ids.append(int(row["id"]))
+    vectors = embedder.embed([question.stem for question in questions])
+    if len(vectors) != len(questions):
+        raise embedder_module.EmbedderError(
+            f"向量化返回数量对不上：题目 {len(questions)} 道，向量 {len(vectors)} 个。"
+        )
+    rows = [
+        (
+            question_id,
+            embedder.model_name,
+            len(vector),
+            embedder_module.pack_vector(vector),
+        )
+        for question_id, vector in zip(ids, vectors)
+    ]
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO question_embeddings"
+            " (question_id, model, dims, vector) VALUES (?, ?, ?, ?)",
+            rows,
+        )
+    return len(rows)
+
+
+def similar_questions(
+    conn: sqlite3.Connection,
+    *,
+    stem: str,
+    top_k: int = DEFAULT_RECOMMEND_LIMIT,
+    embedder: embedder_module.Embedder,
+) -> list[tuple[Question, float]]:
+    """按题干语义找相似题（纯只读，不写库）。
+
+    返回 [(题目, 相似度)] 按相似度降序；库里没有向量时返回空列表，
+    由调用方提示用户先跑 import-questions --embed。
+    """
+    limit = _validate_limit(top_k)
+    query_text = stem.strip()
+    if not query_text:
+        raise config_loader.ConfigError("题干不能为空。")
+    stored = [
+        (int(row["question_id"]), embedder_module.unpack_vector(bytes(row["vector"])))
+        for row in conn.execute("SELECT question_id, vector FROM question_embeddings")
+    ]
+    if not stored:
+        return []
+    query_vector = embedder.embed([query_text])[0]
+    # 换模型后旧向量维度可能对不上：只比维度一致的，不静默混排
+    stored = [item for item in stored if len(item[1]) == len(query_vector)]
+    if not stored:
+        return []
+    ranked = embedder_module.rank_by_similarity(query_vector, stored, limit)
+    results: list[tuple[Question, float]] = []
+    for question_id, score in ranked:
+        row = conn.execute("SELECT * FROM questions WHERE id = ?", (question_id,)).fetchone()
+        if row is None:
+            continue
+        results.append((_row_to_question(conn, row), score))
+    return results
+
+
+def _load_keyed_vectors(conn: sqlite3.Connection) -> list[tuple[str, list[float]]]:
+    """读出库里全部 (question_key, 向量)，供去重扫描用。"""
+    rows = conn.execute(
+        "SELECT q.question_key, e.vector FROM question_embeddings e"
+        " JOIN questions q ON q.id = e.question_id"
+    ).fetchall()
+    return [
+        (str(row["question_key"]), embedder_module.unpack_vector(bytes(row["vector"])))
+        for row in rows
+    ]
+
+
+def suggest_tags(
+    *,
+    stem: str,
+    tags: Sequence[str],
+    top_k: int = 3,
+    embedder: embedder_module.Embedder,
+) -> list[tuple[str, float]]:
+    """知识点标签自动建议（只建议，不写库）。
+    
+    对称任务：调用方传入带 classification 前缀的 embedder，
+    题干与标签用同一前缀向量化，按余弦相似度降序返回 [(标签, 相似度)]。
+    tags 为空时返回空列表。
+    """
+    names = [str(t) for t in tags]
+    if not names:
+        return []
+    query_text = stem.strip()
+    if not query_text:
+        raise config_loader.ConfigError("题干不能为空。")
+    query_vector = embedder.embed([query_text])[0]
+    tag_vectors = embedder.embed(names)
+    if len(tag_vectors) != len(names):
+        raise embedder_module.EmbedderError(
+            f"标签向量化数量对不上：标签 {len(names)} 个，向量 {len(tag_vectors)} 个。"
+        )
+    scored = [
+        (name, embedder_module.cosine_similarity(query_vector, vector))
+        for name, vector in zip(names, tag_vectors)
+    ]
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return scored[:_validate_limit(top_k)]
+
+
+def find_duplicates(
+    conn: sqlite3.Connection,
+    *,
+    threshold: float = 0.95,
+) -> list[tuple[str, str, float]]:
+    """全库扫描疑似重复题（只读）：两两比对已存向量。
+    
+    返回 [(key1, key2, 相似度)] 按相似度降序；threshold 取值须在 (0, 1] 内。
+    O(n²)：题库上万时要换向量索引；pilot 阶段够用。
+    库里没有向量时返回空列表。
+    """
+    if not 0.0 < threshold <= 1.0:
+        raise config_loader.ConfigError(
+            f"去重阈值须在 (0, 1] 内，当前是 {threshold}。"
+        )
+    keyed = _load_keyed_vectors(conn)
+    pairs: list[tuple[str, str, float]] = []
+    for i in range(len(keyed)):
+        for j in range(i + 1, len(keyed)):
+            score = embedder_module.cosine_similarity(keyed[i][1], keyed[j][1])
+            if score >= threshold:
+                pairs.append((keyed[i][0], keyed[j][0], score))
+    pairs.sort(key=lambda item: item[2], reverse=True)
+    return pairs
+
+
+def check_import_duplicates(
+    conn: sqlite3.Connection,
+    new_keys: Sequence[str],
+    *,
+    threshold: float = 0.95,
+) -> list[tuple[str, str, float]]:
+    """新导入题目 vs 库中其他题目的疑似重复对（只读）。
+    
+    new_keys 是本次导入的 question_key；与库里除自己外的全部向量比对，
+    返回 [(新题key, 库中key, 相似度)] 按相似度降序。
+    """
+    if not 0.0 < threshold <= 1.0:
+        raise config_loader.ConfigError(
+            f"去重阈值须在 (0, 1] 内，当前是 {threshold}。"
+        )
+    wanted = {str(k) for k in new_keys}
+    if not wanted:
+        return []
+    keyed = _load_keyed_vectors(conn)
+    if not keyed:
+        return []
+    by_key = dict(keyed)
+    pairs: list[tuple[str, str, float]] = []
+    for new_key in wanted:
+        new_vector = by_key.get(new_key)
+        if new_vector is None:
+            continue
+        for other_key, other_vector in keyed:
+            if other_key == new_key:
+                continue
+            score = embedder_module.cosine_similarity(new_vector, other_vector)
+            if score >= threshold:
+                pairs.append((new_key, other_key, score))
+    pairs.sort(key=lambda item: item[2], reverse=True)
+    return pairs
+
+
 def import_questions(
     config: config_loader.AppConfig,
     *,
@@ -787,8 +1008,16 @@ def import_questions(
     demo: bool = False,
     columns_spec: str | None = None,
     dry_run: bool = False,
+    embed: bool = False,
+    suggest: bool = False,
+    check_dup: bool = False,
+    dup_threshold: float = 0.95,
 ) -> dict[str, Any]:
-    """导入题目的总入口：三种来源选一个，dry-run 与执行走同一份计划。"""
+    """导入题目的总入口：三种来源选一个，dry-run 与执行走同一份计划。
+
+    embed=True 时在导入成功后追加向量化（opt-in）：Ollama 不可用只记警告，
+    不影响导入本身（约定 12：开关显式给出就必须有可见动作，失败也要说清楚）。
+    """
     chosen = [
         name
         for name, given in (
@@ -835,7 +1064,52 @@ def import_questions(
         if dry_run:
             return {"dry_run": True, "plan": plan}
         counts = apply_import_plan(conn, plan)
-        return {"dry_run": False, "plan": plan, **counts}
+        result: dict[str, Any] = {"dry_run": False, "plan": plan, **counts}
+        # --check-dup 需要新题的向量：隐含 embed
+        want_embed = embed or check_dup
+        oe: embedder_module.OllamaEmbedder | None = None
+        if want_embed:
+            try:
+                oe = embedder_module.OllamaEmbedder(
+                    prefix=embedder_module.OllamaEmbedder.SIMILARITY_PREFIX
+                )
+                result["embedded"] = embed_question_vectors(conn, plan.questions, oe)
+                result["embed_warning"] = None
+            except embedder_module.EmbedderError as exc:
+                result["embedded"] = 0
+                result["embed_warning"] = str(exc)
+        if suggest:
+            try:
+                ce = embedder_module.OllamaEmbedder(
+                    prefix=embedder_module.OllamaEmbedder.CLASSIFICATION_PREFIX
+                )
+                result["suggested"] = {
+                    question.question_key: suggest_tags(
+                        stem=question.stem,
+                        tags=config.question_bank.tags,
+                        top_k=3,
+                        embedder=ce,
+                    )
+                    for question in plan.questions
+                }
+                result["suggest_warning"] = None
+            except embedder_module.EmbedderError as exc:
+                result["suggested"] = {}
+                result["suggest_warning"] = str(exc)
+        if check_dup:
+            if result.get("embed_warning") is not None:
+                result["duplicates"] = []
+                result["dup_warning"] = "向量化失败，去重无从比起：" + str(
+                    result["embed_warning"]
+                )
+            else:
+                result["duplicates"] = check_import_duplicates(
+                    conn,
+                    [question.question_key for question in plan.questions],
+                    threshold=dup_threshold,
+                )
+                result["dup_warning"] = None
+        return result
     finally:
         conn.close()
 

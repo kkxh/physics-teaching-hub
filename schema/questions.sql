@@ -37,3 +37,13 @@ CREATE TABLE IF NOT EXISTS question_tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_question_tags_tag ON question_tags(tag);
+
+-- 3. 题目向量（Phase 5 实验分支 pilot）：一题一行，供语义相似检索。
+--    与 schema/migrations/0002_question_embeddings.sql 的 DDL 保持一致。
+CREATE TABLE IF NOT EXISTS question_embeddings (
+    question_id INTEGER PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE,
+    model       TEXT NOT NULL CHECK (length(trim(model)) > 0),
+    dims        INTEGER NOT NULL CHECK (dims > 0),
+    vector      BLOB NOT NULL CHECK (length(vector) > 0),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
