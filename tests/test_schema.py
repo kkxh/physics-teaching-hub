@@ -376,6 +376,7 @@ class MigrationTests(unittest.TestCase):
 QUESTION_OBJECTS = (
     "questions",
     "question_tags",
+    "question_embeddings",
     "idx_questions_qtype",
     "idx_question_tags_tag",
 )
@@ -412,7 +413,7 @@ class UpgradeTests(unittest.TestCase):
         self.assertTrue(summary["changed"])
         self.assertEqual(summary["from"], "phase2")
         self.assertEqual(summary["to"], init_db.SCHEMA_VERSION)
-        self.assertEqual(summary["migrations"], ["0001_questions.sql"])
+        self.assertEqual(summary["migrations"], ["0001_questions.sql", "0002_question_embeddings.sql"])
 
         conn = init_db.connect(database)
         try:
@@ -435,7 +436,7 @@ class UpgradeTests(unittest.TestCase):
             ]
         finally:
             conn.close()
-        self.assertEqual(recorded, ["0001_questions.sql"])
+        self.assertEqual(recorded, ["0001_questions.sql", "0002_question_embeddings.sql"])
 
     def test_upgrade_is_idempotent(self):
         write_phase2_database(self.config.paths.database)
@@ -443,7 +444,7 @@ class UpgradeTests(unittest.TestCase):
         first = init_db.upgrade_database(self.config)
         second = init_db.upgrade_database(self.config)
 
-        self.assertEqual(first["migrations"], ["0001_questions.sql"])
+        self.assertEqual(first["migrations"], ["0001_questions.sql", "0002_question_embeddings.sql"])
         self.assertFalse(second["changed"])
         self.assertEqual(second["migrations"], [])
 
@@ -454,7 +455,7 @@ class UpgradeTests(unittest.TestCase):
             ]
         finally:
             conn.close()
-        self.assertEqual(recorded, ["0001_questions.sql"])
+        self.assertEqual(recorded, ["0001_questions.sql", "0002_question_embeddings.sql"])
 
     def test_upgraded_schema_matches_a_fresh_database(self):
         database = write_phase2_database(self.config.paths.database)

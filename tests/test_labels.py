@@ -94,6 +94,7 @@ SCANNED_MODULES = (
     "config_loader.py",
     "dashboard.py",
     "db.py",
+    "embedder.py",
     "errors.py",
     "exam.py",
     "hub.py",
