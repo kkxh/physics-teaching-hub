@@ -53,7 +53,7 @@ EXPECTED_TABLES_BY_FILE: Mapping[str, tuple[str, ...]] = {
     "errors.sql": ("error_tags", "error_records", "behavior_records"),
     "profile.sql": ("ability_scores",),
     "alerts.sql": ("alerts", "follow_ups"),
-    "questions.sql": ("questions", "question_tags"),
+    "questions.sql": ("questions", "question_tags", "question_embeddings"),
 }
 
 SCHEMA_VERSION = db_module.SCHEMA_VERSION

@@ -6,6 +6,7 @@
     python3 hub.py upgrade-db
     python3 hub.py import-questions (--json 文件 | --csv 文件 | --demo)
     python3 hub.py list-questions [--tag 标签] [--keyword 关键词]
+    python3 hub.py similar-questions --stem 题干 [--top 5]
     python3 hub.py recommend-questions --student 学号
     python3 hub.py import-scores --demo
     python3 hub.py make-report
@@ -30,6 +31,7 @@ import api as api_module
 import config_loader
 import dashboard as dashboard_module
 import db as db_module
+import embedder as embedder_module
 import errors as errors_module
 import exam as exam_module
 import homework as homework_module
@@ -94,6 +96,27 @@ def build_parser() -> argparse.ArgumentParser:
         help='CSV 表头映射，如 "题号=question_key,知识点=tags"',
     )
     questions_parser.add_argument("--dry-run", action="store_true", help="只预览，不写库")
+    questions_parser.add_argument(
+        "--embed",
+        action="store_true",
+        help="导入成功后追加向量化（需本机 Ollama 在运行；失败只警告，不影响导入）",
+    )
+    questions_parser.add_argument(
+        "--suggest",
+        action="store_true",
+        help="为每道新题建议知识点标签（只打印不写库；需本机 Ollama 在运行）",
+    )
+    questions_parser.add_argument(
+        "--check-dup",
+        action="store_true",
+        help="检查新题与库中题目是否疑似重复（隐含 --embed；只报告不拦截）",
+    )
+    questions_parser.add_argument(
+        "--dup-threshold",
+        type=float,
+        default=0.95,
+        help="去重相似度阈值（0, 1]，默认 0.95",
+    )
 
     list_questions_parser = subparsers.add_parser(
         "list-questions", help="检索题目（答案默认隐藏）"
@@ -116,6 +139,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"最多返回多少道，默认 {questions_module.DEFAULT_LIST_LIMIT}",
     )
     list_questions_parser.add_argument(
+        "--show-answer", action="store_true", help="显示答案与解析（默认隐藏）"
+    )
+
+    similar_parser = subparsers.add_parser(
+        "similar-questions", help="按题干语义找相似题（需本机 Ollama 在运行）"
+    )
+    add_global_options(similar_parser, suppress_defaults=True)
+    similar_parser.add_argument("--stem", required=True, help="题干文本")
+    similar_parser.add_argument(
+        "--top",
+        type=int,
+        default=questions_module.DEFAULT_RECOMMEND_LIMIT,
+        help=f"返回几道，默认 {questions_module.DEFAULT_RECOMMEND_LIMIT}",
+    )
+    similar_parser.add_argument(
         "--show-answer", action="store_true", help="显示答案与解析（默认隐藏）"
     )
 
@@ -951,6 +989,10 @@ def run_import_questions(config: config_loader.AppConfig, args: argparse.Namespa
         demo=args.demo,
         columns_spec=args.columns,
         dry_run=args.dry_run,
+        embed=args.embed,
+        suggest=args.suggest,
+        check_dup=args.check_dup,
+        dup_threshold=args.dup_threshold,
     )
     plan = result["plan"]
     qtypes: dict[str, int] = {}
@@ -971,6 +1013,31 @@ def run_import_questions(config: config_loader.AppConfig, args: argparse.Namespa
         f"题库现有 {result['total']} 道。"
     )
     print("提示：题目内容是使用者数据，只存在本机数据库里；仓库不分发题库。")
+    if result.get("embed_warning") is not None:
+        print(f"[warn] --embed 已指定但向量化失败：{result['embed_warning']}")
+        print("[warn] 导入本身已成功；向量可在 Ollama 就绪后重跑本次导入补上。")
+    elif "embedded" in result:
+        print(f"已生成题目向量：{result['embedded']} 道。")
+    if result.get("suggest_warning") is not None:
+        print(f"[warn] --suggest 已指定但标签建议失败：{result['suggest_warning']}")
+    elif "suggested" in result:
+        print("知识点标签建议（仅供参考，未写库）：")
+        for key, suggestions in result["suggested"].items():
+            if suggestions:
+                joined = "、".join(f"{tag}（{score:.2f}）" for tag, score in suggestions)
+                print(f"  {key}：{joined}")
+            else:
+                print(f"  {key}：无可建议标签")
+    if result.get("dup_warning") is not None:
+        print(f"[warn] {result['dup_warning']}")
+    elif "duplicates" in result:
+        duplicates = result["duplicates"]
+        if duplicates:
+            print(f"疑似重复（阈值 {args.dup_threshold}，共 {len(duplicates)} 对，只报告不拦截）：")
+            for new_key, existing_key, score in duplicates:
+                print(f"  {new_key} ≈ {existing_key}（相似度 {score:.3f}）")
+        else:
+            print("去重检查通过：新题与库中题目没有疑似重复。")
     return 0
 
 
@@ -1010,6 +1077,50 @@ def run_list_questions(config: config_loader.AppConfig, args: argparse.Namespace
         print(f"共 {len(items)} 道（含答案与解析）。")
     else:
         print(f"共 {len(items)} 道；答案默认隐藏，加 --show-answer 才显示。")
+    return 0
+
+
+def run_similar_questions(config: config_loader.AppConfig, args: argparse.Namespace) -> int:
+    if not config.paths.database.is_file():
+        raise config_loader.ConfigError(
+            f"还没有数据库：{config.paths.database}；"
+            "请先运行 python3 hub.py init-db --demo，再用 import-questions 导入题库。"
+        )
+
+    conn = db_module.connect(config.paths.database)
+    try:
+        db_module.require_schema(conn)
+        if questions_module.count_questions(conn) == 0:
+            print(
+                "题库为空：先跑 python3 hub.py import-questions --demo，"
+                "或用 --json / --csv 导入你自己的题库。"
+            )
+            return 0
+        oe = embedder_module.OllamaEmbedder(
+            prefix=embedder_module.OllamaEmbedder.SIMILARITY_PREFIX
+        )
+        try:
+            scored = questions_module.similar_questions(
+                conn, stem=args.stem, top_k=args.top, embedder=oe
+            )
+        except embedder_module.EmbedderError as exc:
+            raise config_loader.ConfigError(
+                f"向量化失败：{exc}（需本机 Ollama 在运行并已 pull 模型）。"
+            ) from exc
+    finally:
+        conn.close()
+
+    if not scored:
+        print(
+            "题库里还没有题目向量：先跑 python3 hub.py import-questions --demo --embed，"
+            "或给已有题库补一次带 --embed 的导入。"
+        )
+        return 2
+    print(questions_module.format_similar_questions(scored, show_answer=args.show_answer))
+    if args.show_answer:
+        print(f"共 {len(scored)} 道（含答案与解析）。")
+    else:
+        print(f"共 {len(scored)} 道；答案默认隐藏，加 --show-answer 才显示。")
     return 0
 
 
@@ -1082,6 +1193,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_import_questions(config, args)
         if args.command == "list-questions":
             return run_list_questions(config, args)
+        if args.command == "similar-questions":
+            return run_similar_questions(config, args)
         if args.command == "recommend-questions":
             return run_recommend_questions(config, args)
         if args.command == "import-scores":
