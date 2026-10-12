@@ -1000,6 +1000,46 @@ def check_import_duplicates(
     return pairs
 
 
+def gate_new_duplicates(
+    conn: sqlite3.Connection,
+    new_items: Sequence[tuple[str, str]],
+    embedder: embedder_module.Embedder,
+    *,
+    threshold: float = 0.95,
+) -> list[tuple[str, str, float]]:
+    """入库前去重门（只读）：新题 vs 库中向量 ＋ 新题批内两两比对。
+
+    new_items 是 [(question_key, stem)]；向量在内存里算，不写库，
+    所以门在真正写入之前就能判定 —— 拦截时整批无写入、无需回滚。
+    返回 [(新题key, 对方key, 相似度)] 按相似度降序；threshold 取值须在 (0, 1] 内。
+    """
+    if not 0.0 < threshold <= 1.0:
+        raise config_loader.ConfigError(
+            f"去重阈值须在 (0, 1] 内，当前是 {threshold}。"
+        )
+    items = [(str(key), str(stem)) for key, stem in new_items]
+    if not items:
+        return []
+    vectors = embedder.embed([stem for _, stem in items])
+    if len(vectors) != len(items):
+        raise embedder_module.EmbedderError(
+            f"向量化返回数量对不上：题目 {len(items)} 道，向量 {len(vectors)} 个。"
+        )
+    pairs: list[tuple[str, str, float]] = []
+    for (key, _), vector in zip(items, vectors):
+        for other_key, other_vector in _load_keyed_vectors(conn):
+            score = embedder_module.cosine_similarity(vector, other_vector)
+            if score >= threshold:
+                pairs.append((key, other_key, score))
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            score = embedder_module.cosine_similarity(vectors[i], vectors[j])
+            if score >= threshold:
+                pairs.append((items[i][0], items[j][0], score))
+    pairs.sort(key=lambda item: item[2], reverse=True)
+    return pairs
+
+
 def import_questions(
     config: config_loader.AppConfig,
     *,
@@ -1012,11 +1052,17 @@ def import_questions(
     suggest: bool = False,
     check_dup: bool = False,
     dup_threshold: float = 0.95,
+    block_dup: bool = False,
 ) -> dict[str, Any]:
     """导入题目的总入口：三种来源选一个，dry-run 与执行走同一份计划。
 
     embed=True 时在导入成功后追加向量化（opt-in）：Ollama 不可用只记警告，
     不影响导入本身（约定 12：开关显式给出就必须有可见动作，失败也要说清楚）。
+
+    block_dup=True 时打开去重入库门（opt-in）：在写入之前用内存向量比对
+    新题与库中题目（以及批内两两），相似度 ≥ dup_threshold 则整批拒绝、
+    抛出 ConfigError，此时没有任何写入。Ollama 不可用时门无法工作，
+    按约定 12 降级为警告放行，不影响导入。
     """
     chosen = [
         name
@@ -1063,21 +1109,58 @@ def import_questions(
         )
         if dry_run:
             return {"dry_run": True, "plan": plan}
-        counts = apply_import_plan(conn, plan)
-        result: dict[str, Any] = {"dry_run": False, "plan": plan, **counts}
-        # --check-dup 需要新题的向量：隐含 embed
-        want_embed = embed or check_dup
+        result: dict[str, Any] = {"dry_run": False, "plan": plan}
+        # --check-dup / --block-dup 需要向量：隐含 embed；门要在写入前判定，
+        # 所以 embedder 的构造提前到 apply_import_plan 之前。
+        want_embed = embed or check_dup or block_dup
         oe: embedder_module.OllamaEmbedder | None = None
+        oe_warning: str | None = None
         if want_embed:
             try:
                 oe = embedder_module.OllamaEmbedder(
                     prefix=embedder_module.OllamaEmbedder.SIMILARITY_PREFIX
                 )
-                result["embedded"] = embed_question_vectors(conn, plan.questions, oe)
-                result["embed_warning"] = None
             except embedder_module.EmbedderError as exc:
+                oe_warning = str(exc)
+        if block_dup:
+            if oe is None:
+                result["dup_gate"] = "skipped"
+                result["dup_gate_warning"] = (
+                    "去重门需要向量化但不可用"
+                    + (f"：{oe_warning}" if oe_warning else "")
+                    + "；已降级为放行（约定 12），导入本身不受影响。"
+                )
+            else:
+                blocked = gate_new_duplicates(
+                    conn,
+                    [(question.question_key, question.stem) for question in plan.questions],
+                    oe,
+                    threshold=dup_threshold,
+                )
+                if blocked:
+                    detail = "、".join(
+                        f"{new_key}≈{other_key}（{score:.3f}）"
+                        for new_key, other_key, score in blocked[:5]
+                    )
+                    raise config_loader.ConfigError(
+                        f"去重门拦截：{len(blocked)} 对疑似重复"
+                        f"（阈值 {dup_threshold}），整批未入库：{detail}。"
+                        "请删改重复题后重导，或调低 --dup-threshold。"
+                    )
+                result["dup_gate"] = "passed"
+        counts = apply_import_plan(conn, plan)
+        result.update(counts)
+        if want_embed:
+            if oe is None:
                 result["embedded"] = 0
-                result["embed_warning"] = str(exc)
+                result["embed_warning"] = oe_warning
+            else:
+                try:
+                    result["embedded"] = embed_question_vectors(conn, plan.questions, oe)
+                    result["embed_warning"] = None
+                except embedder_module.EmbedderError as exc:
+                    result["embedded"] = 0
+                    result["embed_warning"] = str(exc)
         if suggest:
             try:
                 ce = embedder_module.OllamaEmbedder(

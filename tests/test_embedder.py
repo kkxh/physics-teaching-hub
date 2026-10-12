@@ -413,5 +413,116 @@ class ImportEmbedHookTests(unittest.TestCase):
         self.assertIsNotNone(result["embed_warning"])
 
 
+class DupGateTests(unittest.TestCase):
+    """去重入库门 --block-dup：拦截整批、批内互查、Ollama 不可用时降级放行。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name)
+        self.config = make_cli_config(self.base)
+        conn = init_db.connect(self.config.paths.database)
+        try:
+            init_db.apply_schema(conn)
+            with conn:
+                for key, stem in (("q-a", "题干甲"), ("q-b", "题干乙")):
+                    questions.insert_question(conn, make_question(key, stem))
+            fake = FakeEmbedder({"题干甲": [1.0, 0.0], "题干乙": [0.0, 1.0]})
+            questions.embed_question_vectors(
+                conn,
+                [make_question("q-a", "题干甲"), make_question("q-b", "题干乙")],
+                fake,
+            )
+        finally:
+            conn.close()
+
+    def _payload(self, *items):
+        return [
+            {
+                "question_key": key,
+                "qtype": "fill",
+                "stem": stem,
+                "answer": "略",
+                "tags": ["牛顿第二定律"],
+            }
+            for key, stem in items
+        ]
+
+    def _write_json(self, payload):
+        path = self.base / "new.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    def _import_blocking(self, payload, table):
+        path = self._write_json(payload)
+        fake = FakeEmbedder(table)
+        with mock.patch.object(embedder, "OllamaEmbedder", return_value=fake):
+            return questions.import_questions(
+                self.config, json_path=path, block_dup=True
+            )
+
+    def _count(self):
+        conn = init_db.connect(self.config.paths.database)
+        try:
+            return questions.count_questions(conn)
+        finally:
+            conn.close()
+
+    def test_blocks_near_duplicate_and_writes_nothing(self):
+        table = {"题干甲": [1.0, 0.0], "题干乙": [0.0, 1.0], "新题干甲": [0.999, 0.001]}
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            self._import_blocking(self._payload(("n-1", "新题干甲")), table)
+        self.assertIn("去重门拦截", str(ctx.exception))
+        self.assertIn("n-1", str(ctx.exception))
+        self.assertEqual(self._count(), 2)  # 整批未入库
+
+    def test_passes_clean_import(self):
+        table = {"题干甲": [1.0, 0.0], "题干乙": [0.0, 1.0], "题干丁": [0.5, 0.5]}
+        result = self._import_blocking(self._payload(("n-1", "题干丁")), table)
+        self.assertEqual(result["imported"], 1)
+        self.assertEqual(result["dup_gate"], "passed")
+        self.assertEqual(self._count(), 3)
+
+    def test_blocks_within_batch_pair(self):
+        # 批内两道互相疑似重复，但都与库中题目不重复
+        table = {
+            "题干甲": [1.0, 0.0],
+            "题干乙": [0.0, 1.0],
+            "批内甲": [0.6, 0.8],
+            "批内乙": [0.6, 0.8],
+        }
+        with self.assertRaises(config_loader.ConfigError) as ctx:
+            self._import_blocking(
+                self._payload(("n-1", "批内甲"), ("n-2", "批内乙")), table
+            )
+        self.assertIn("去重门拦截", str(ctx.exception))
+        self.assertEqual(self._count(), 2)
+
+    def test_ollama_down_fails_open_with_warning(self):
+        path = self._write_json(self._payload(("n-1", "题干丁")))
+        with mock.patch.object(
+            embedder, "OllamaEmbedder", side_effect=embedder.EmbedderError("连不上")
+        ):
+            result = questions.import_questions(
+                self.config, json_path=path, block_dup=True
+            )
+        self.assertEqual(result["imported"], 1)  # 约定 12：降级放行
+        self.assertEqual(result["dup_gate"], "skipped")
+        self.assertIn("降级为放行", result["dup_gate_warning"])
+
+    def test_gate_unit_compares_memory_vectors(self):
+        conn = init_db.connect(self.config.paths.database)
+        try:
+            fake = FakeEmbedder({"新题": [0.999, 0.001]})
+            pairs = questions.gate_new_duplicates(
+                conn, [("n-1", "新题")], fake, threshold=0.95
+            )
+        finally:
+            conn.close()
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0][0], "n-1")
+        self.assertEqual(pairs[0][1], "q-a")
+
+
 if __name__ == "__main__":
     unittest.main()

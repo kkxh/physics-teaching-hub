@@ -112,6 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="检查新题与库中题目是否疑似重复（隐含 --embed；只报告不拦截）",
     )
     questions_parser.add_argument(
+        "--block-dup",
+        action="store_true",
+        help="去重入库门（opt-in）：新题与库中题目语义相似度≥阈值则整批拒绝入库；"
+        "隐含 --embed；Ollama 不可用时降级为警告放行",
+    )
+    questions_parser.add_argument(
         "--dup-threshold",
         type=float,
         default=0.95,
@@ -993,6 +999,7 @@ def run_import_questions(config: config_loader.AppConfig, args: argparse.Namespa
         suggest=args.suggest,
         check_dup=args.check_dup,
         dup_threshold=args.dup_threshold,
+        block_dup=args.block_dup,
     )
     plan = result["plan"]
     qtypes: dict[str, int] = {}
@@ -1038,6 +1045,10 @@ def run_import_questions(config: config_loader.AppConfig, args: argparse.Namespa
                 print(f"  {new_key} ≈ {existing_key}（相似度 {score:.3f}）")
         else:
             print("去重检查通过：新题与库中题目没有疑似重复。")
+    if result.get("dup_gate") == "passed":
+        print(f"去重门通过：{plan.row_count} 道新题无疑似重复（阈值 {args.dup_threshold}），已入库。")
+    elif result.get("dup_gate_warning") is not None:
+        print(f"[warn] {result['dup_gate_warning']}")
     return 0
 
 
